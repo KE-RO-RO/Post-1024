@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>便籤／常用語工具</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- 頂部列 -->
+  <header id="topbar">
+    <div class="brand" id="appTitle" title="點擊可改名">便籤／常用語</div>
+    <input type="search" id="searchBox" placeholder="搜尋標籤或內容…" autocomplete="off">
+    <div class="spacer"></div>
+    <button class="icon-btn" id="btnMenu" title="選單">☰</button>
+  </header>
+
+  <div id="body">
+
+    <!-- 左側分類側欄 -->
+    <nav id="sidebar">
+      <div id="categoryList"></div>
+      <button class="cat-add" id="btnAddCategory" title="新增分類">＋</button>
+    </nav>
+
+    <!-- 卡片區 -->
+    <main id="content">
+      <div id="contentHeader">
+        <h1 id="currentCategoryName">—</h1>
+        <button class="btn-primary" id="btnAddTab">＋ 新增卡片</button>
+      </div>
+      <div id="cardGrid"></div>
+      <div id="emptyHint" class="empty-hint" hidden>
+        這個分類還沒有卡片。點右上角「＋ 新增卡片」開始。
+      </div>
+    </main>
+
+  </div>
+</div>
+
+<!-- 複製成功的浮動提示 -->
+<div id="toast" hidden></div>
+
+<!-- 通用彈窗 -->
+<div id="modalBackdrop" hidden>
+  <div id="modal">
+    <div id="modalTitle"></div>
+    <div id="modalBody"></div>
+    <div id="modalFooter"></div>
+  </div>
+</div>
+
+<!-- ☰ 選單 -->
+<div id="menuPanel" hidden>
+  <button data-act="export">匯出資料</button>
+  <button data-act="import">匯入資料</button>
+  <hr>
+  <button data-act="rename">修改標題</button>
+  <button data-act="about">關於／說明</button>
+</div>
+
+<input type="file" id="importFile" accept=".json,application/json" hidden>
+
+<script src="js/data.js"></script>
+<script src="js/vault.js"></script>
+<script src="js/clipboard.js"></script>
+<script src="js/tabs.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
