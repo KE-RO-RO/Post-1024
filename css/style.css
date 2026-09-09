@@ -501,9 +501,11 @@ textarea.inline-edit, input.inline-edit {
 }
 #modalBody { padding: 16px; }
 #modalBody label { display: block; margin-bottom: 5px; color: var(--text-dim); font-size: 12.5px; }
-#modalBody input[type=text],
-#modalBody input[type=date],
-#modalBody input[type=url],
+/* 用排除法而不是逐一列出型別：原本只列 text/date/url，
+   漏掉 password 導致私人卡片的密碼欄完全沒吃到樣式（縮成預設窄框、
+   沒有下緣，又被 .field-hint 的負 margin 蓋住）。
+   只有 checkbox / radio / file 需要保留瀏覽器原生外觀。 */
+#modalBody input:not([type=checkbox]):not([type=radio]):not([type=file]),
 #modalBody textarea {
   width: 100%;
   padding: 7px 10px;
@@ -810,6 +812,48 @@ mark { background: rgba(169,155,201,0.45); color: var(--text); border-radius: 2p
   align-items: center;
   gap: 4px;
   margin-bottom: 6px;
+}
+/* 摺疊時沒有下方內容，留著 margin 會讓列高多出一截 */
+.pv-head.collapsed { margin-bottom: 0; }
+
+.pv-tri {
+  width: 18px;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.pv-memo-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+.pv-memo-actions .icon-btn { width: 24px; height: 22px; padding: 0; }
+
+/* 型別二選一。做成一整條分段控制，不用兩顆分開的按鈕，
+   讓「只能選一個」在視覺上就講清楚 */
+.kind-seg {
+  display: flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.kind-seg button {
+  flex: 1;
+  padding: 6px 0;
+  background: none;
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.kind-seg button:last-child { border-right: none; }
+.kind-seg button:hover { background: var(--panel-hover); }
+.kind-seg button.on {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .pv-name {
   flex: 1;
