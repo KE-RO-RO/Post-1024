@@ -1,0 +1,899 @@
+/* ============================================================
+   便籤／常用語工具 — 樣式
+   沿用桌面版的暗色毛玻璃方向與莫蘭迪薰衣草紫強調色。
+   所有顏色集中在這裡的變數，之後要換色只改這一段就好。
+   ============================================================ */
+
+:root {
+  --bg:            #1b1922;
+  --bg-deep:       #141219;
+  --panel:         rgba(44, 40, 56, 0.72);
+  --panel-solid:   #2c2838;
+  --panel-hover:   rgba(58, 53, 74, 0.85);
+  --border:        rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  --text:          #e8e5ef;
+  --text-dim:      #9a94ab;
+  --text-faint:    #6f6980;
+
+  --accent:        #a99bc9;   /* 莫蘭迪薰衣草紫 */
+  --accent-soft:   rgba(169, 155, 201, 0.18);
+  --accent-line:   rgba(169, 155, 201, 0.45);
+  --danger:        #c98b8b;
+  --ok:            #8fbfa4;
+
+  --radius:        10px;
+  --radius-sm:     6px;
+  --shadow:        0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+* { box-sizing: border-box; }
+
+/* HTML 的 hidden 屬性只是瀏覽器預設樣式表裡的 display:none，
+   底下任何自己寫的 display 規則都會蓋掉它（例如 #modalBackdrop 的 display:grid），
+   結果就是元素明明有 hidden 卻照樣顯示出來。這條把它拉回來，
+   之後新增元件時也不必再擔心這個坑。 */
+[hidden] { display: none !important; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: "Microsoft JhengHei UI", "Microsoft JhengHei", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+}
+
+/* 淡淡的漸層底，讓毛玻璃有東西可以透 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(169,155,201,0.13), transparent 45%),
+    radial-gradient(circle at 85% 85%, rgba(140,165,190,0.10), transparent 45%),
+    var(--bg);
+  z-index: -1;
+}
+
+#app { height: 100%; display: flex; flex-direction: column; }
+
+/* ---------- 頂部列 ---------- */
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.brand {
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+}
+.brand:hover { background: var(--accent-soft); }
+
+.spacer { flex: 1; }
+
+#searchBox {
+  width: 260px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.22);
+  color: var(--text);
+  outline: none;
+}
+#searchBox:focus { border-color: var(--accent-line); }
+#searchBox::placeholder { color: var(--text-faint); }
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 17px;
+  cursor: pointer;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+}
+.icon-btn:hover { background: var(--accent-soft); color: var(--text); }
+
+/* ---------- 主體 ---------- */
+#body { flex: 1; display: flex; min-height: 0; }
+
+/* ---------- 側欄 ---------- */
+#sidebar {
+  width: 132px;
+  flex: 0 0 132px;
+  padding: 14px 0 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow-y: auto;
+}
+
+/* 分類貼紙：只有左側圓角，沿用桌面版的視覺語言 */
+.cat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: var(--radius) 0 0 var(--radius);
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-dim);
+  position: relative;
+}
+.cat:hover { background: var(--panel-hover); color: var(--text); }
+.cat.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  border-right: none;
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.cat .short {
+  width: 22px; height: 22px;
+  flex: 0 0 22px;
+  display: grid; place-items: center;
+  background: rgba(0,0,0,0.28);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--accent);
+}
+.cat .name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+.cat .more {
+  opacity: 0;
+  color: var(--text-faint);
+  padding: 0 2px;
+  font-size: 15px;
+}
+.cat:hover .more { opacity: 1; }
+.cat.dragging { opacity: 0.4; }
+.cat.drop-target { box-shadow: inset 0 3px 0 var(--accent); }
+
+.cat-add {
+  margin-right: 0;
+  padding: 8px;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-right: none;
+  border-radius: var(--radius) 0 0 var(--radius);
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 15px;
+}
+.cat-add:hover { color: var(--accent); border-color: var(--accent-line); }
+
+/* ---------- 內容區 ---------- */
+#content {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 18px 24px;
+  overflow-y: auto;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-left: 1px solid var(--border);
+  border-top-left-radius: var(--radius);
+}
+
+#contentHeader {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+#currentCategoryName {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+}
+
+.btn-primary {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--text);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-primary:hover { background: rgba(169,155,201,0.3); }
+
+.btn-plain {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-plain:hover { color: var(--text); border-color: var(--accent-line); }
+
+.btn-danger {
+  background: rgba(201,139,139,0.15);
+  border: 1px solid rgba(201,139,139,0.4);
+  color: #e0b3b3;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-danger:hover { background: rgba(201,139,139,0.28); }
+
+.empty-hint {
+  color: var(--text-faint);
+  padding: 40px 0;
+  text-align: center;
+}
+
+/* ---------- 卡片網格 ---------- */
+#cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.card {
+  background: rgba(30, 27, 39, 0.72);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+}
+.card-type {
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 7px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+.card-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: text;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-title:hover { background: rgba(255,255,255,0.06); }
+.card-head .icon-btn { font-size: 13px; padding: 2px 6px; }
+.card-body { padding: 10px; }
+
+/* 看起來像文字，點下去就能改 */
+.editable {
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: text;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 20px;
+}
+.editable:hover { background: rgba(255,255,255,0.06); }
+.editable.placeholder { color: var(--text-faint); }
+
+textarea.inline-edit, input.inline-edit {
+  width: 100%;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--accent-line);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 4px 6px;
+  font: inherit;
+  outline: none;
+  resize: vertical;
+}
+
+/* ---------- 常用語：試算表式版面 ---------- */
+
+/* 常用語卡片橫跨整個網格，內容才有地方完整呈現 */
+.card-wide { grid-column: 1 / -1; }
+
+/* 標題列與資料列共用同一組欄寬定義。
+   原本兩邊各自用 flex 搭 flex-basis，只要有一邊的 border 或 padding 差一點點
+   欄位就會對不齊；改成 grid 之後對齊是版面規則保證的，不靠兩邊寫得一模一樣。 */
+.qp-head,
+.qp-row {
+  display: grid;
+  grid-template-columns: 18px 54px 200px 1fr 90px;
+  gap: 12px;
+  align-items: start;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+}
+
+.qp-head {
+  font-size: 11px;
+  color: var(--text-faint);
+  border-bottom-color: var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+  cursor: default;
+}
+
+.qp-row {
+  border-radius: var(--radius-sm);
+  border-bottom-color: var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.qp-row:hover { background: rgba(255,255,255,0.055); border-color: var(--border); }
+.qp-row.copied {
+  background: rgba(143,191,164,0.22);
+  border-color: rgba(143,191,164,0.5);
+}
+
+/* 標籤欄：固定寬度，像試算表的 A 欄 */
+.qp-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
+  border-right: 1px solid var(--border);
+  padding-right: 12px;
+}
+.qp-head .qp-label { font-weight: 400; font-size: 11px; color: var(--text-faint); }
+
+/* 內容欄：吃掉剩下的全部寬度 */
+.qp-content {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  max-height: 3.2em;      /* 大約兩行，超出的部分用展開鈕看 */
+  overflow: hidden;
+}
+.qp-head .qp-content { font-size: 11px; color: var(--text-faint); max-height: none; }
+.qp-row.expanded .qp-content { max-height: none; }
+
+.qp-label.placeholder,
+.qp-content.placeholder { color: var(--text-faint); font-weight: 400; }
+
+.qp-actions,
+.qp-actions-space {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.row-hint {
+  color: var(--text-faint);
+  padding: 10px 2px;
+  font-size: 12px;
+}
+
+.row-add {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 12px;
+}
+.row-add:hover { color: var(--accent); border-color: var(--accent-line); }
+
+/* ---------- 待辦 ---------- */
+.todo-row { display: flex; align-items: flex-start; gap: 8px; padding: 4px 2px; }
+.todo-row input[type=checkbox] { margin-top: 4px; accent-color: var(--accent); }
+.todo-row .editable { flex: 1; }
+.todo-row.done .editable { text-decoration: line-through; color: var(--text-faint); }
+
+/* ---------- 連結 ---------- */
+.link-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; }
+.link-row a {
+  color: var(--accent);
+  text-decoration: none;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-row a:hover { text-decoration: underline; }
+
+/* 刪除鈕：平常不搶眼，滑過才轉紅，降低誤點機率 */
+.icon-btn.danger-btn:hover {
+  background: rgba(201,139,139,0.2);
+  color: #e6bcbc;
+}
+
+.date-picker {
+  width: 100%;
+  margin-top: 10px;
+  padding: 5px 8px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+.date-picker:focus { border-color: var(--accent-line); }
+
+/* ---------- 倒數 ---------- */
+.countdown-days {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--accent);
+  text-align: center;
+  padding: 6px 0;
+}
+.countdown-days small { font-size: 12px; color: var(--text-dim); font-weight: 400; }
+.countdown-date { text-align: center; color: var(--text-dim); font-size: 12px; }
+.countdown-days.overdue { color: var(--danger); }
+
+/* ---------- 提示 ---------- */
+#toast {
+  position: fixed;
+  bottom: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 18, 25, 0.95);
+  border: 1px solid var(--accent-line);
+  color: var(--text);
+  padding: 9px 20px;
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  z-index: 300;
+  font-size: 13px;
+}
+#toast.err { border-color: rgba(201,139,139,0.6); color: #e6bcbc; }
+
+/* ---------- 彈窗 ---------- */
+#modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: grid;
+  place-items: center;
+  z-index: 200;
+}
+#modal {
+  width: min(440px, 90vw);
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+#modalTitle {
+  padding: 13px 16px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+#modalBody { padding: 16px; }
+#modalBody label { display: block; margin-bottom: 5px; color: var(--text-dim); font-size: 12.5px; }
+#modalBody input[type=text],
+#modalBody input[type=date],
+#modalBody input[type=url],
+#modalBody textarea {
+  width: 100%;
+  padding: 7px 10px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  margin-bottom: 12px;
+}
+#modalBody input:focus, #modalBody textarea:focus { border-color: var(--accent-line); }
+#modalFooter {
+  padding: 12px 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.type-opt {
+  padding: 12px 10px;
+  background: rgba(0,0,0,0.22);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+.type-opt:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+.type-opt small { display: block; color: var(--text-faint); font-size: 11px; margin-top: 3px; }
+.type-opt[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+/* ---------- ☰ 選單 ---------- */
+#menuPanel {
+  position: fixed;
+  top: 46px;
+  right: 14px;
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  z-index: 250;
+  padding: 5px;
+  min-width: 150px;
+}
+#menuPanel button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+#menuPanel button:hover { background: var(--accent-soft); }
+#menuPanel hr { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+
+/* ---------- 捲軸 ---------- */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(169,155,201,0.4); }
+
+/* 搜尋命中 */
+mark { background: rgba(169,155,201,0.45); color: var(--text); border-radius: 2px; }
+
+/* ============================================================
+   v2.2 新增：拖曳把手、釘選、複製鍵欄位
+   ============================================================ */
+
+.drag-handle {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  cursor: grab;
+  padding: 0 2px;
+  font-size: 13px;
+  letter-spacing: -1px;
+  user-select: none;
+}
+.drag-handle:hover { color: var(--accent); }
+.drag-handle:active { cursor: grabbing; }
+
+.card.dragging { opacity: 0.35; }
+.card.drop-target { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 釘選的卡片給一條左邊框，掃一眼就知道哪些是固定在上面的 */
+.card.pinned { border-left: 2px solid var(--accent); }
+.icon-btn.pin-on { color: var(--accent); }
+
+/* 複製鍵欄位：比原本的序號寬，要塞得下 Alt+A */
+.qp-index {
+  height: 20px;
+  justify-self: start;
+  padding: 0 7px;
+  display: grid; place-items: center;
+  font-size: 10.5px;
+  color: var(--accent);
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 1px;
+  white-space: nowrap;
+}
+.qp-index.unset { background: transparent; border-color: transparent; }
+.qp-head .qp-index {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  padding: 0;
+}
+
+/* 複製鍵錄製 */
+.key-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.key-box {
+  flex: 1;
+  padding: 7px 10px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: center;
+}
+.key-box:hover { border-color: var(--accent-line); }
+.key-box.unset { color: var(--text-faint); }
+.key-box.recording {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.key-err {
+  color: #e0b3b3;
+  font-size: 12px;
+  line-height: 1.6;
+  margin-bottom: 10px;
+}
+
+/* ============================================================
+   v2.3 新增：連結收藏的批次開啟
+   ============================================================ */
+
+.link-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.link-bar .spacer { flex: 1; }
+
+.link-mini {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+}
+.link-mini:hover { color: var(--text); border-color: var(--accent-line); }
+
+.link-open { font-size: 12px; padding: 4px 12px; }
+.link-open:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.link-check { accent-color: var(--accent); flex: 0 0 auto; cursor: pointer; }
+
+.link-badge {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  background: rgba(0,0,0,0.25);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.link-badge.warn { color: #e0b3b3; background: rgba(201,139,139,0.15); }
+
+.field-hint {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.6;
+  margin: -6px 0 12px;
+}
+
+/* ============================================================
+   v2.5：倒數提醒補強
+   ============================================================ */
+
+.countdown-days.soon { color: #d9b98c; }   /* 三天內：琥珀色預警 */
+
+.countdown-divider {
+  margin: 14px 0 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* 整個欄位都可點，不是只有右邊那顆小日曆圖示 */
+.date-picker { cursor: pointer; }
+.date-picker:hover { border-color: var(--accent-line); }
+.date-picker::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  filter: invert(0.7);
+}
+
+
+/* ============================================================
+   v2.6：常用語列的拖曳把手、動作鈕尺寸統一
+   ============================================================ */
+
+.qp-grip {
+  color: var(--text-faint);
+  cursor: grab;
+  font-size: 12px;
+  line-height: 20px;
+  letter-spacing: -1px;
+  user-select: none;
+  opacity: 0;
+  text-align: center;
+}
+.qp-row:hover .qp-grip { opacity: 1; }
+.qp-grip:hover { color: var(--accent); }
+.qp-grip:active { cursor: grabbing; }
+
+.qp-row.dragging { opacity: 0.35; }
+.qp-row.row-drop-target { box-shadow: inset 0 2px 0 var(--accent); }
+
+/* 展開鈕與鉛筆、✕ 的字面大小差異很大（⌄ 之類的符號在多數字型裡偏小），
+   統一給固定尺寸的方框並置中，讓三顆看起來一樣大、也對得齊 */
+.qp-actions .icon-btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* ============================================================
+   v2.8：說明鈕
+   ------------------------------------------------------------
+   ⓘ 這類「圈起來的字」字元在不同字型底下大小、粗細、垂直位置差很多，
+   常常糊成一團。改成自己畫一個圓框放普通字元，外觀就穩定了。
+   ============================================================ */
+
+.icon-btn.help-btn {
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 600;
+}
+.icon-btn.help-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+/* ============================================================
+   v3.0：私人卡片
+   ============================================================ */
+
+.card-type-editable { cursor: text; }
+.card-type-editable:hover { background: rgba(169,155,201,0.3); }
+
+.locked-body {
+  padding: 22px 16px;
+  text-align: center;
+}
+.locked-icon { color: var(--text-faint); line-height: 1; }
+.locked-text {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 10px 0 14px;
+}
+
+/* ---- 單筆項目 ---- */
+
+.pv-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 10px;
+  margin-bottom: 8px;
+  background: rgba(255,255,255,0.025);
+}
+.pv-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.pv-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pv-head .icon-btn,
+.pv-field .icon-btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.pv-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+.pv-label {
+  flex: 0 0 34px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.pv-value {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pv-value.secret { letter-spacing: 2px; color: var(--text-faint); }
+
+.pv-note {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- 復原金鑰 ---- */
+
+.recovery-key {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 15px;
+  letter-spacing: 1px;
+  text-align: center;
+  color: var(--accent);
+  background: rgba(0,0,0,0.32);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  padding: 14px 10px;
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+
+.modal-links {
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-top: -4px;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px;
+  text-decoration: underline;
+}
+.link-btn:hover { color: var(--accent); }
+.link-btn.danger:hover { color: #e0b3b3; }
