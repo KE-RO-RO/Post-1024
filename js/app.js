@@ -474,8 +474,99 @@
     return i;
   }
 
-  /** 第一次使用時建立主密碼，並把復原金鑰交給使用者。 */
-  function setupVault(onDone) {
+  /**
+   * 新增私人卡片時強制二選一，不給預設值。
+   *
+   * 加密與不加密是完全不同的東西，不該有一個「順手按下去」的預設答案。
+   * 兩張卡片的行為差異本身就是最清楚的區分：加密的一定要輸密碼才看得到，
+   * 不加密的一打開就在那裡。所以卡片上不另外加「未加密」的警告標籤。
+   */
+  function askPrivateMode() {
+    var grid = document.createElement('div');
+    grid.className = 'type-grid';
+
+    [
+      ['enc', '加密保存', '需要主密碼才看得到，存在瀏覽器裡的是密文'],
+      ['plain', '不加密', '直接看得到，內容以明文存放。適合不需要保護的記事']
+    ].forEach(function (m) {
+      var b = document.createElement('button');
+      b.className = 'type-opt';
+      b.innerHTML = '<strong>' + m[1] + '</strong><small>' + m[2] + '</small>';
+      if (m[0] === 'enc' && !Vault.available()) {
+        b.disabled = true;
+        b.innerHTML = '<strong>' + m[1] + '</strong><small>這個環境不支援加密</small>';
+      } else {
+        b.addEventListener('click', function () {
+          closeModal();
+          promptModal('新增私人卡片', '卡片標題', '未命名', function (title) {
+            var tab = DB.addTab('private', state.currentCategoryId, title);
+            tab.encrypted = (m[0] === 'enc');
+            DB.touch();
+            // 加密的話立刻設定金鑰；不加密的直接就能用
+            if (tab.encrypted) openCard(tab, null);
+          });
+        });
+      }
+      grid.appendChild(b);
+    });
+
+    showModal({
+      title: '這張卡片要加密嗎',
+      body: grid,
+      buttons: [{ text: '取消', onClick: closeModal }]
+    });
+  }
+
+  /**
+   * 加密與不加密互轉。
+   *
+   * 轉成加密：現有明文用新建的卡片金鑰加密後寫進 tab.enc，清掉 tab.entries。
+   * 轉成不加密：**要先驗身分**，把明文攤回 tab.entries 並清掉 tab.enc。
+   *   這個方向等於主動降低保護，所以驗證不能省。
+   */
+  function convertPrivate(tab) {
+    if (tab.encrypted) {
+      confirmDeletePrivate(tab, '取消加密',
+        '「' + (tab.title || '未命名') + '」的內容會改成<strong>明文</strong>存放，' +
+        '任何能打開這個瀏覽器的人都看得到，匯出檔裡也會是明文。',
+        function () {
+          // 驗過身分後仍要真的解開才拿得到明文
+          openCard(tab, function () {
+            var list = Vault.getPlain(tab.id) || [];
+            tab.entries = list;
+            tab.encrypted = false;
+            tab.enc = null;
+            tab.vault = null;
+            Vault.lockCard(tab.id);
+            DB.touch();
+            Clip.toast('已改為不加密');
+            render();
+          });
+        });
+      return;
+    }
+
+    confirmModal('加上密碼保護',
+      '「' + (tab.title || '未命名') + '」的內容會被加密，之後要輸入主密碼才看得到。',
+      '繼續', function () {
+        tab.encrypted = true;
+        var list = tab.entries || [];
+        openCard(tab, function () {
+          Vault.setPlain(tab.id, list);
+          tab.entries = [];
+          savePrivate(tab).then(function () {
+            Clip.toast('已加上密碼保護');
+            render();
+          });
+        });
+      });
+  }
+
+  /**
+   * 第一次使用加密時建立主密碼，並把復原金鑰交給使用者。
+   * 建完主金鑰之後接著幫這張卡片建立它專屬的金鑰包裹。
+   */
+  function setupMasterFor(tab, onDone) {
     var wrap = document.createElement('div');
     var p1 = labeledInput(wrap, '設定主密碼', 'password', '', '長度不限，越長越安全');
     var p2 = labeledInput(wrap, '再輸入一次', 'password', '');
@@ -496,9 +587,15 @@
       if (p1.value.length < 4) { err.textContent = '主密碼太短了'; err.hidden = false; return; }
       if (p1.value !== p2.value) { err.textContent = '兩次輸入不一致'; err.hidden = false; return; }
 
-      Vault.setup(p1.value, AUTO_LOCK_MINUTES).then(function (recovery) {
-        closeModal();
-        showRecoveryKey(recovery, onDone);
+      var pw = p1.value;
+      Vault.setupMaster(pw).then(function (recovery) {
+        return Vault.createCard(tab.id, pw, AUTO_LOCK_MINUTES).then(function (v) {
+          tab.vault = v;
+          Vault.setPlain(tab.id, []);
+          DB.touch();
+          closeModal();
+          showRecoveryKey(recovery, onDone);
+        });
       }, function (e) {
         err.textContent = '建立失敗：' + (e && e.message || '未知錯誤');
         err.hidden = false;
@@ -563,21 +660,27 @@
     showModal({ title: '復原金鑰', body: wrap, noEscape: true, buttons: [doneBtn] });
   }
 
-  /** 解鎖。同時提供「用復原金鑰」與「兩個都忘了」的出路。 */
-  function openVault(onDone) {
+  /**
+   * 解開「一張」卡片。各卡片獨立：開這張不會連帶開別張。
+   * 同時提供「用復原金鑰」與「兩個都忘了」的出路。
+   */
+  function openCard(tab, onDone) {
     if (!Vault.available()) {
       showModal({
         title: '這個環境不支援加密',
         body: '<div style="line-height:1.85;color:var(--text-dim);font-size:13px">' +
-          '瀏覽器的加密功能只在 <strong style="color:var(--text)">https</strong> 網址下開放。' +
-          '目前這個頁面是用檔案總管直接開啟的，沒有這個功能。<br><br>' +
-          '把工具放上 GitHub Pages 之後就能使用。</div>',
+          '這個瀏覽器沒有提供網頁加密功能（<strong style="color:var(--text)">crypto.subtle</strong>），' +
+          '所以加密卡片無法使用。<br><br>' +
+          '請改用較新的瀏覽器，或用 https 開頭的網址開啟本工具。</div>',
         buttons: [{ text: '知道了', onClick: closeModal }]
       });
       return;
     }
 
-    if (!Vault.exists()) { setupVault(onDone); return; }
+    // 還沒有主金鑰 → 這是第一張加密卡片，先建立主密碼
+    if (!Vault.masterExists()) { setupMasterFor(tab, onDone); return; }
+    // 有主金鑰但這張卡片還沒有自己的包裹 → 幫它建一個
+    if (!tab.vault) { attachCardVault(tab, onDone); return; }
 
     var wrap = document.createElement('div');
     var pw = labeledInput(wrap, '主密碼', 'password', '');
@@ -592,13 +695,13 @@
     var forgot = document.createElement('button');
     forgot.className = 'link-btn';
     forgot.textContent = '忘記主密碼';
-    forgot.addEventListener('click', function () { closeModal(); useRecovery(onDone); });
+    forgot.addEventListener('click', function () { closeModal(); useRecovery(tab, onDone); });
     links.appendChild(forgot);
     wrap.appendChild(links);
 
     function go() {
       err.hidden = true;
-      Vault.unlock(pw.value, AUTO_LOCK_MINUTES).then(function () {
+      Vault.unlockCard(tab.id, tab.vault, pw.value, AUTO_LOCK_MINUTES).then(function () {
         closeModal();
         Clip.toast('已解鎖，' + AUTO_LOCK_MINUTES + ' 分鐘後自動隱藏');
         render();
@@ -623,7 +726,7 @@
     });
   }
 
-  function useRecovery(onDone) {
+  function useRecovery(tab, onDone) {
     var wrap = document.createElement('div');
     var key = labeledInput(wrap, '復原金鑰', 'text', '', 'XXXX-XXXX-XXXX-XXXX-XXXX-XXXX');
     var p1 = labeledInput(wrap, '設定新的主密碼', 'password', '');
@@ -648,9 +751,21 @@
       if (p1.value.length < 4) { err.textContent = '主密碼太短了'; err.hidden = false; return; }
       if (p1.value !== p2.value) { err.textContent = '兩次輸入不一致'; err.hidden = false; return; }
 
-      Vault.unlockWithRecovery(key.value, AUTO_LOCK_MINUTES).then(function () {
-        return Vault.changePassword(p1.value);
-      }).then(function () {
+      /* 復原金鑰是破窗路徑：先用它打開這張卡片，再把主密碼換掉。
+         換密碼要重新包裹主金鑰與「每一張」加密卡片的密碼包裹，
+         所以要先把全部卡片撈出來交給 vault 層。 */
+      var cards = DB.raw().tabs.filter(function (t) {
+        return t.type === 'private' && t.encrypted && t.vault;
+      }).map(function (t) { return { id: t.id, vault: t.vault }; });
+
+      Vault.unlockCard(tab.id, tab.vault, key.value, AUTO_LOCK_MINUTES).then(function () {
+        return Vault.changePassword(Vault.normalizeRecoveryKey(key.value), p1.value, cards);
+      }).then(function (out) {
+        DB.raw().vault.pwd = out.master;
+        DB.raw().tabs.forEach(function (t) {
+          if (out[t.id]) t.vault.pwd = out[t.id];
+        });
+        DB.touch();
         closeModal();
         Clip.toast('主密碼已更新');
         render();
@@ -685,16 +800,73 @@
       }, true);
   }
 
-  function lockVault() {
-    Vault.lock();
+  function lockCard(tab) {
+    Vault.lockCard(tab.id);
     Clip.toast('內容已隱藏');
     render();
   }
 
+  /**
+   * 主金鑰已經存在，但這張卡片還沒有自己的金鑰包裹時用。
+   * 需要主密碼才能取出主金鑰去做第二層包裹。
+   */
+  function attachCardVault(tab, onDone) {
+    var wrap = document.createElement('div');
+    var pw = labeledInput(wrap, '主密碼', 'password', '');
+
+    var hint = document.createElement('div');
+    hint.className = 'field-hint';
+    hint.textContent = '這張卡片會用你既有的主密碼保護，不會另外產生新的復原金鑰。';
+    wrap.appendChild(hint);
+
+    var err = document.createElement('div');
+    err.className = 'key-err';
+    err.hidden = true;
+    wrap.appendChild(err);
+
+    function go() {
+      err.hidden = true;
+      Vault.createCard(tab.id, pw.value, AUTO_LOCK_MINUTES).then(function (v) {
+        tab.vault = v;
+        if (!Vault.getPlain(tab.id)) Vault.setPlain(tab.id, []);
+        DB.touch();
+        closeModal();
+        render();
+        if (onDone) onDone();
+      }, function () {
+        err.textContent = '主密碼不正確';
+        err.hidden = false;
+        pw.select();
+      });
+    }
+
+    pw.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+
+    showModal({
+      title: '設定這張卡片的保護',
+      body: wrap,
+      noEscape: true,
+      buttons: [
+        { text: '取消', onClick: closeModal },
+        { text: '確定', cls: 'btn-primary', onClick: go }
+      ]
+    });
+  }
+
   /** 儲存一張私人卡片：把記憶體裡的明文加密後寫回 tab.enc。 */
+  /**
+   * 儲存一張私人卡片。
+   * 加密卡片：把記憶體裡的明文用該卡片自己的金鑰加密後寫回 tab.enc。
+   * 不加密卡片：內容本來就在 tab.entries，直接存檔。
+   */
   function savePrivate(tab) {
+    if (!tab.encrypted) {
+      tab.updatedAt = DB.nowIso();
+      DB.touch();
+      return Promise.resolve();
+    }
     var entries = Vault.getPlain(tab.id) || [];
-    return Vault.encrypt(entries).then(function (blob) {
+    return Vault.encryptFor(tab.id, entries).then(function (blob) {
       tab.enc = blob;
       tab.updatedAt = DB.nowIso();
       DB.touch();
@@ -703,50 +875,150 @@
     });
   }
 
+  /** 讀出一張私人卡片目前可用的內容。鎖著的加密卡片回傳 null。 */
+  function privateEntries(tab) {
+    return tab.encrypted ? Vault.getPlain(tab.id) : (tab.entries || []);
+  }
+
+  function setPrivateEntries(tab, list) {
+    if (tab.encrypted) Vault.setPlain(tab.id, list);
+    else tab.entries = list;
+  }
+
   /** 編輯單筆。item 為 null 代表新增。 */
+  /**
+   * 刪除私人內容前先驗身分。
+   *
+   * 順序是「先驗證 → 再確認」：驗過了才問要不要刪，才不會讓人打完密碼
+   * 又在確認彈窗前退出，白打一次。
+   *
+   * 還沒建立保管層的空白卡片沒有東西可驗，直接走一般確認。
+   */
+  function confirmDeletePrivate(tab, title, message, onOk) {
+    // 不加密的卡片沒有東西可驗，走一般確認
+    if (!tab || !tab.encrypted || !tab.vault || !Vault.available()) {
+      return confirmModal(title, message + '<br><br>此動作無法復原。', '確定刪除', onOk, true);
+    }
+
+    var wrap = document.createElement('div');
+    var input = labeledInput(wrap, '主密碼', 'password', '', '');
+
+    var hint = document.createElement('div');
+    hint.className = 'field-hint';
+    hint.textContent = '這裡也接受復原金鑰。驗證只是確認身分，不會把內容打開。';
+    wrap.appendChild(hint);
+
+    var err = document.createElement('div');
+    err.className = 'key-err';
+    err.hidden = true;
+    wrap.appendChild(err);
+
+    function go() {
+      err.hidden = true;
+      if (!input.value) { err.textContent = '請先輸入主密碼'; err.hidden = false; return; }
+      Vault.verifyCard(tab.vault, input.value).then(function () {
+        closeModal();
+        confirmModal(title, message + '<br><br>此動作無法復原。', '確定刪除', onOk, true);
+      }, function () {
+        err.textContent = '主密碼或復原金鑰不正確';
+        err.hidden = false;
+        input.value = '';
+        input.focus();
+      });
+    }
+
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+
+    showModal({
+      title: '確認身分',
+      body: wrap,
+      noEscape: true,
+      buttons: [
+        { text: '取消', onClick: closeModal },
+        { text: '繼續', cls: 'btn-primary', onClick: go }
+      ]
+    });
+  }
+
   function editPrivate(tab, item) {
     var isNew = !item;
+    var kind = (item && item.kind === 'memo') ? 'memo' : 'info';
     var wrap = document.createElement('div');
 
-    var name = labeledInput(wrap, '名稱', 'text', item && item.name, '');
-    var url  = labeledInput(wrap, '網址（可留空）', 'text', item && item.url, 'https://');
-    var user = labeledInput(wrap, '帳號', 'text', item && item.user, '');
-    var pass = labeledInput(wrap, '密碼', 'text', item && item.pass, '');
+    /* 型別只影響中間那段欄位。名稱與網址兩種都有——
+       名稱是摺疊時唯一露出來的東西，網址驅動鏈條鈕。 */
+    var kl = document.createElement('label');
+    kl.textContent = '型別';
+    wrap.appendChild(kl);
 
-    var l = document.createElement('label');
-    l.textContent = '備註（可留空）';
+    var seg = document.createElement('div');
+    seg.className = 'kind-seg';
+    wrap.appendChild(seg);
+
+    var infoBox = document.createElement('div');
+    var memoBox = document.createElement('div');
+
+    var name = labeledInput(wrap, '名稱', 'text', item && item.name, '方便你辨認的名稱');
+    var url  = labeledInput(wrap, '網址（可留空）', 'text', item && item.url, 'https://');
+    wrap.appendChild(infoBox);
+    wrap.appendChild(memoBox);
+
+    var user = labeledInput(infoBox, '帳號', 'text', item && item.user, '');
+    var pass = labeledInput(infoBox, '密碼', 'text', item && item.pass, '');
+
+    var nl = document.createElement('label');
     var note = document.createElement('textarea');
     note.rows = 3;
     note.value = (item && item.note) || '';
     note.addEventListener('keydown', function (e) { e.stopPropagation(); });
-    wrap.appendChild(l);
-    wrap.appendChild(note);
+    memoBox.appendChild(nl);
+    memoBox.appendChild(note);
 
     var hint = document.createElement('div');
     hint.className = 'field-hint';
-    hint.textContent = '密碼欄位在這裡是明碼顯示，方便你確認有沒有打錯。' +
-                       '存檔後在卡片上會遮起來。';
     wrap.appendChild(hint);
 
+    function applyKind() {
+      var isMemo = kind === 'memo';
+      infoBox.hidden = isMemo;
+      nl.textContent = isMemo ? '內容' : '備註（可留空）';
+      hint.textContent = isMemo
+        ? '摺疊時只會看到名稱，內容要點開才顯示。'
+        : '密碼欄位在這裡是明碼顯示，方便你確認有沒有打錯。存檔後在卡片上會遮起來。';
+      Array.prototype.forEach.call(seg.children, function (b) {
+        b.classList.toggle('on', b.dataset.kind === kind);
+      });
+    }
+
+    [['info', '資訊'], ['memo', '備忘錄']].forEach(function (k) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.kind = k[0];
+      b.textContent = k[1];
+      b.addEventListener('click', function () { kind = k[0]; applyKind(); });
+      seg.appendChild(b);
+    });
+    applyKind();
+
     function save() {
-      var list = Vault.getPlain(tab.id) || [];
+      var list = privateEntries(tab) || [];
+      var isMemo = kind === 'memo';
+      var payload = {
+        kind: kind,
+        name: name.value.trim(),
+        url: url.value.trim(),
+        // 切成備忘錄時清掉帳密，避免留下看不到但還在檔案裡的殘值
+        user: isMemo ? '' : user.value.trim(),
+        pass: isMemo ? '' : pass.value,
+        note: note.value.trim()
+      };
       if (isNew) {
-        list.push({
-          id: DB.uid(),
-          name: name.value.trim(),
-          url: url.value.trim(),
-          user: user.value.trim(),
-          pass: pass.value,
-          note: note.value.trim()
-        });
+        payload.id = DB.uid();
+        list.push(payload);
       } else {
-        item.name = name.value.trim();
-        item.url = url.value.trim();
-        item.user = user.value.trim();
-        item.pass = pass.value;
-        item.note = note.value.trim();
+        Object.keys(payload).forEach(function (k) { item[k] = payload[k]; });
       }
-      Vault.setPlain(tab.id, list);
+      setPrivateEntries(tab, list);
       closeModal();
       savePrivate(tab);
     }
@@ -964,10 +1236,10 @@
       });
     }
     if (tab.type === 'private') {
-      // 鎖住時只比對卡片標題。內容一律不參與搜尋，
-      // 否則「搜到了就代表存在」本身就洩漏了資訊
-      if (!Vault.isUnlocked()) return false;
-      var list = Vault.getPlain(tab.id) || [];
+      /* 加密且鎖著時內容一律不參與搜尋——「搜到了就代表存在」
+         本身就洩漏了資訊。不加密的卡片沒有這個顧慮，照常比對。 */
+      if (tab.encrypted && !Vault.isCardUnlocked(tab.id)) return false;
+      var list = privateEntries(tab) || [];
       return list.some(function (x) {
         return matchText(x.name) || matchText(x.user) || matchText(x.note);
       });
@@ -1003,6 +1275,11 @@
       confirmDelete: function (title, message, onOk) {
         confirmModal(title, message + '<br><br>此動作無法復原。', '確定刪除', onOk, true);
       },
+      // 私人卡片與其中的每一筆，刪除前要先驗主密碼或復原金鑰
+      confirmDeletePrivate: confirmDeletePrivate,
+      privateEntries: privateEntries,
+      setPrivateEntries: setPrivateEntries,
+      convertPrivate: convertPrivate,
       togglePin: function (tab) {
         var err = DB.togglePin(tab.id);
         if (err) Clip.toast(err, true);
@@ -1013,8 +1290,8 @@
       editLink: editLink,
       openLinks: openLinks,
       showPopupHelp: function () { showPopupHelp(null); },
-      openVault: function () { openVault(null); },
-      lockVault: lockVault,
+      openCard: function (tab) { openCard(tab, null); },
+      lockCard: lockCard,
       savePrivate: savePrivate,
       editPrivate: editPrivate
     };
@@ -1075,14 +1352,10 @@
       } else {
         b.addEventListener('click', function () {
           closeModal();
-          var makeIt = function () {
-            promptModal('新增' + t[1], '卡片標題', t[1] === '私人' ? '未命名' : t[1], function (title) {
-              DB.addTab(t[0], state.currentCategoryId, title);
-            });
-          };
-          // 第一張私人卡片要先有主密碼，否則存不了東西
-          if (t[0] === 'private' && !Vault.isUnlocked()) openVault(makeIt);
-          else makeIt();
+          if (t[0] === 'private') { askPrivateMode(); return; }
+          promptModal('新增' + t[1], '卡片標題', t[1], function (title) {
+            DB.addTab(t[0], state.currentCategoryId, title);
+          });
         });
       }
       grid.appendChild(b);
@@ -1161,14 +1434,20 @@
     $('menuPanel').hidden = true;
 
     if (act === 'export') {
-      var hasPrivate = DB.raw().tabs.some(function (t) { return t.type === 'private'; });
+      /* 只有存在「加密」卡片才需要驗身分。全部都是不加密卡片時
+         匯出完全不會被打斷——分享給同事的人多半是這種情況。 */
+      var locked = DB.raw().tabs.filter(function (t) {
+        return t.type === 'private' && t.encrypted && t.vault && !Vault.isCardUnlocked(t.id);
+      });
       var doExport = function () {
         DB.saveNow();
         download('便籤資料_' + stamp() + '.json', DB.exportJson());
         Clip.toast('已匯出');
       };
-      // 匯出檔裡的私人內容是密文，但仍先驗一次身分才放行
-      if (hasPrivate && !Vault.isUnlocked()) openVault(doExport);
+      // 匯出檔裡的加密內容是密文，但仍先驗一次身分才放行
+      if (locked.length) confirmDeletePrivate(locked[0], '匯出資料',
+        '這份資料裡有加密卡片，匯出前請先確認身分。匯出檔中的加密內容仍然是密文。',
+        doExport);
       else doExport();
     }
 
@@ -1216,6 +1495,7 @@
     DB.load();
     DB.onChange(render);
 
+    // 每張卡片各自計時，所以這個回呼會帶著是哪一張到期
     Vault.onLock(function () {
       Clip.toast('已超過 ' + AUTO_LOCK_MINUTES + ' 分鐘，內容自動隱藏');
       render();

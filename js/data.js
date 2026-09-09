@@ -119,7 +119,12 @@
     if (type === 'countdown') { base.dueDate = ''; base.items = []; }
     if (type === 'private') {
       base.badge = '私人';        // 標題列小圓標的文字，可自行改成不起眼的字
+      /* encrypted 刻意不給預設值。建立卡片時強制使用者二選一，
+         沒選過的卡片不該被當成「已加密」或「未加密」任何一種。 */
+      base.encrypted = null;
+      base.vault = null;          // { pwd, rec }：這張卡片專屬的金鑰包裹
       base.enc = null;            // { iv, data }：加密後的內容，明文永不進硬碟
+      base.entries = [];          // 不加密時的明文內容
     }
     return base;
   }
@@ -320,7 +325,11 @@
       createdAt: t.createdAt || nowIso(),
       updatedAt: t.updatedAt || nowIso()
     };
-    if (tab.type === 'note') tab.content = t.content || '';
+    if (tab.type === 'note') {
+      tab.content = t.content || '';
+      // 版面偏好，跟著資料走，沒有就留空讓它用預設高度
+      if (t.editorHeight) tab.editorHeight = t.editorHeight;
+    }
     if (tab.type === 'quickphrase') {
       tab.rows = (t.rows || []).map(function (r, j) {
         return {
@@ -338,7 +347,11 @@
     if (tab.type === 'table') { tab.columns = t.columns || []; tab.rows = t.rows || []; }
     if (tab.type === 'private') {
       tab.badge = t.badge || '私人';
+      tab.badge = t.badge || '私人';
+      tab.encrypted = (t.encrypted === true || t.encrypted === false) ? t.encrypted : null;
+      tab.vault = t.vault || null;
       tab.enc = t.enc || null;
+      tab.entries = Array.isArray(t.entries) ? t.entries : [];
     }
     return tab;
   }

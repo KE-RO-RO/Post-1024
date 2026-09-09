@@ -49,7 +49,14 @@
       var input = document.createElement(opt.multiline ? 'textarea' : 'input');
       input.className = 'inline-edit';
       input.value = getValue() || '';
-      if (opt.multiline) input.rows = Math.min(10, Math.max(2, input.value.split('\n').length + 1));
+      if (opt.multiline) {
+        input.rows = Math.min(10, Math.max(2, input.value.split('\n').length + 1));
+        /* 使用者手動拉過大小就照他拉的來。瀏覽器會把拖曳結果寫進
+           inline style 的 height，所以只要在收工時把它存起來、
+           下次開啟時套回去，框就不會每次縮回預設高度。 */
+        var saved = opt.getHeight && opt.getHeight();
+        if (saved) input.style.height = saved;
+      }
 
       el.textContent = '';
       el.classList.remove('placeholder');
@@ -62,6 +69,8 @@
       function finish() {
         if (el.dataset.editing !== '1') return;
         el.dataset.editing = '0';
+        // 高度不管有沒有取消都記下來——那是版面偏好，不是內容
+        if (opt.setHeight && input.style.height) opt.setHeight(input.style.height);
         if (!cancelled) setValue(input.value);
         el.innerHTML = '';
         paint();
@@ -145,10 +154,15 @@
       }, 'help-btn'));
     }
 
-    if (tab.type === 'private' && Vault.isUnlocked()) {
-      head.appendChild(iconBtn('⦿', '立即隱藏內容', function () {
-        ctx.lockVault();
-      }));
+    if (tab.type === 'private') {
+      if (tab.encrypted && Vault.isCardUnlocked(tab.id)) {
+        head.appendChild(iconBtn('⦿', '立即隱藏內容', function () {
+          ctx.lockCard(tab);
+        }));
+      }
+      head.appendChild(iconBtn(tab.encrypted ? '⚿' : '⚯',
+        tab.encrypted ? '取消加密' : '加上密碼保護',
+        function () { ctx.convertPrivate(tab); }));
     }
 
     var pinBtn = iconBtn(tab.pinned ? '★' : '☆',
@@ -158,11 +172,12 @@
     head.appendChild(pinBtn);
 
     head.appendChild(iconBtn('✕', '刪除這張卡片', function () {
-      ctx.confirmDelete(
-        '刪除卡片',
-        '將刪除「' + (tab.title || '未命名') + '」這張卡片及其全部內容。',
-        function () { DB.deleteTab(tab.id); }
-      );
+      var msg = '將刪除「' + (tab.title || '未命名') + '」這張卡片及其全部內容。';
+      if (tab.type === 'private') {
+        ctx.confirmDeletePrivate(tab, '刪除卡片', msg, function () { DB.deleteTab(tab.id); });
+      } else {
+        ctx.confirmDelete('刪除卡片', msg, function () { DB.deleteTab(tab.id); });
+      }
     }, 'danger-btn'));
 
     card.appendChild(head);
@@ -186,7 +201,17 @@
     makeEditable(p,
       function () { return tab.content; },
       function (v) { tab.content = v; tab.updatedAt = DB.nowIso(); DB.touch(true); },
-      { multiline: true, placeholder: '還沒有內容' });
+      {
+        multiline: true,
+        placeholder: '還沒有內容',
+        // 每張便籤各自記，跟著資料檔走，所以匯出匯入與日後的 Drive 同步都會帶著
+        getHeight: function () { return tab.editorHeight; },
+        setHeight: function (h) {
+          if (tab.editorHeight === h) return;
+          tab.editorHeight = h;
+          DB.touch(true);
+        }
+      });
   }
 
   /* ---------- 常用語（核心） ---------- */
@@ -659,18 +684,53 @@
     return new Array(Math.min((pass || '').length, 12) + 1).join('•') || '••••••';
   }
 
+  /* 哪幾筆是展開的。刻意只放在記憶體，不寫進資料檔也不跨鎖定保留——
+     記住展開狀態的話，下次解鎖帳號就直接攤在畫面上，摺疊這層保護等於白做。
+     每次鎖定（見下方 isUnlocked 分支）會整個清空。 */
+  var pvOpen = {};
+
+  /* 鎖定某張卡片時只忘掉它自己的展開狀態，別張不受影響。
+     鍵是「tabId::itemId」，所以用前綴比對就能只清一張。 */
+  function forgetOpen(tabId) {
+    Object.keys(pvOpen).forEach(function (k) {
+      if (k.indexOf(tabId + '::') === 0) delete pvOpen[k];
+    });
+  }
+
+  /* 鏈條圖示自繪，不用 🔗 emoji：emoji 在不同系統會被換成各自的彩色圖案，
+     大小與垂直位置都不受控，跟旁邊線條風格的 ✎ ✕ 擺一起會突兀。
+     同第 15.3、17.2 節的原則。 */
+  var LINK_SVG =
+    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+    'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/>' +
+    '<path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
+
+  function svgIconBtn(svg, title, onClick) {
+    var b = document.createElement('button');
+    b.className = 'icon-btn';
+    b.innerHTML = svg;
+    b.title = title;
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      onClick(e);
+    });
+    return b;
+  }
+
   function renderPrivate(tab, body, ctx) {
-    if (!Vault.available()) {
+    if (tab.encrypted && !Vault.available()) {
       var warn = document.createElement('div');
       warn.className = 'row-hint';
-      warn.innerHTML = '這個環境不支援加密。<br>' +
-        '瀏覽器的加密功能只在 https 網址下開放，' +
-        '用檔案總管直接開啟的頁面無法使用這張卡片。';
+      warn.innerHTML = '這個環境不支援加密，這張卡片無法使用。<br>' +
+        '請改用較新的瀏覽器，或用 https 開頭的網址開啟。';
       body.appendChild(warn);
       return;
     }
 
-    if (!Vault.isUnlocked()) {
+    if (tab.encrypted && !Vault.isCardUnlocked(tab.id)) {
+      // 鎖定就忘掉這張卡片的展開狀態，下次進來一律從全摺疊開始
+      forgetOpen(tab.id);
       var locked = document.createElement('div');
       locked.className = 'locked-body';
       // 刻意不顯示筆數，也不用鎖頭圖示——那些跟「密碼」兩個字一樣顯眼
@@ -687,14 +747,14 @@
       var btn = document.createElement('button');
       btn.className = 'btn-primary';
       btn.textContent = '輸入主密碼';
-      btn.addEventListener('click', function () { ctx.openVault(); });
+      btn.addEventListener('click', function () { ctx.openCard(tab); });
       locked.appendChild(btn);
 
       body.appendChild(locked);
       return;
     }
 
-    var entries = Vault.getPlain(tab.id);
+    var entries = ctx.privateEntries(tab);
 
     if (!entries) {
       var loading = document.createElement('div');
@@ -702,7 +762,7 @@
       loading.textContent = '讀取中…';
       body.appendChild(loading);
       // 解密是非同步的，拿到之後放進記憶體再重繪一次
-      Vault.decrypt(tab.enc).then(function (list) {
+      Vault.decryptFor(tab.id, tab.enc).then(function (list) {
         Vault.setPlain(tab.id, list || []);
         DB.touch();
       }, function () {
@@ -714,11 +774,28 @@
     }
 
     entries.forEach(function (item) {
+      var isMemo = item.kind === 'memo';
+      var okey = tab.id + '::' + item.id;
+      var open = !!pvOpen[okey];
+
       var row = document.createElement('div');
       row.className = 'pv-row';
 
       var head = document.createElement('div');
-      head.className = 'pv-head';
+      head.className = 'pv-head' + (open ? '' : ' collapsed');
+
+      // 展開鈕。摺疊時整列只露出名稱，型別不標——標了等於幫人分類
+      var tri = document.createElement('button');
+      tri.className = 'icon-btn pv-tri';
+      tri.textContent = open ? '▾' : '▸';
+      tri.title = open ? '收合' : '展開';
+      tri.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (pvOpen[okey]) delete pvOpen[okey];
+        else pvOpen[okey] = true;
+        DB.touch();
+      });
+      head.appendChild(tri);
 
       var name = document.createElement('span');
       name.className = 'pv-name';
@@ -726,10 +803,9 @@
       head.appendChild(name);
 
       if (item.url) {
-        var open = iconBtn('↗', '開啟網址', function () {
+        head.appendChild(svgIconBtn(LINK_SVG, '開啟網址', function () {
           if (!Tabs.openTab(item.url)) Clip.toast('分頁被瀏覽器擋下了', true);
-        });
-        head.appendChild(open);
+        }));
       }
 
       head.appendChild(iconBtn('✎', '編輯這一筆', function () {
@@ -737,14 +813,20 @@
       }));
 
       head.appendChild(iconBtn('✕', '刪除這一筆', function () {
-        ctx.confirmDelete('刪除項目', '將刪除「' + (item.name || '未命名') + '」。', function () {
-          var list = Vault.getPlain(tab.id).filter(function (x) { return x.id !== item.id; });
-          Vault.setPlain(tab.id, list);
-          ctx.savePrivate(tab);
-        });
+        ctx.confirmDeletePrivate(tab, '刪除項目',
+          '將刪除「' + (item.name || '未命名') + '」。', function () {
+            var list = (ctx.privateEntries(tab) || []).filter(function (x) {
+              return x.id !== item.id;
+            });
+            delete pvOpen[tab.id + '::' + item.id];
+            ctx.setPrivateEntries(tab, list);
+            ctx.savePrivate(tab);
+          });
       }, 'danger-btn'));
 
       row.appendChild(head);
+
+      if (!open) { body.appendChild(row); return; }
 
       function field(label, value, isSecret) {
         if (!value) return;
@@ -777,14 +859,26 @@
         row.appendChild(line);
       }
 
-      field('帳號', item.user, false);
-      field('密碼', item.pass, true);
+      if (!isMemo) {
+        field('帳號', item.user, false);
+        field('密碼', item.pass, true);
+      }
 
       if (item.note) {
         var note = document.createElement('div');
         note.className = 'pv-note';
         note.textContent = item.note;
         row.appendChild(note);
+
+        // 備忘錄的內文就是這一筆的主體，給一顆複製鈕才好用
+        if (isMemo) {
+          var copyWrap = document.createElement('div');
+          copyWrap.className = 'pv-memo-actions';
+          copyWrap.appendChild(iconBtn('⧉', '複製內容', function () {
+            Clip.copy(item.note, copyWrap, '內容');
+          }));
+          row.appendChild(copyWrap);
+        }
       }
 
       body.appendChild(row);
