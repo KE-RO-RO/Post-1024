@@ -19,6 +19,16 @@
     <div class="brand" id="appTitle" title="點擊可改名">便籤／常用語</div>
     <input type="search" id="searchBox" placeholder="搜尋標籤或內容…" autocomplete="off">
     <div class="spacer"></div>
+    <!-- 雲端同步：常駐一顆狀態點，點開才是帳號與動作。
+         同步跟容量不一樣——它會出錯，而且出錯要馬上看得到，收進選單等於沒人看見 -->
+    <button class="zoom-one sync-one" id="btnSync" title="雲端同步">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.2 9.2 3.9 3.9 0 0 0 6.5 19z"/>
+      </svg>
+      <span class="sync-dot" id="syncDot"></span>
+    </button>
+
     <!-- 顯示大小：平常只有一顆膠囊，點開才列出級距 -->
     <button class="zoom-one" id="btnZoom" title="整個畫面的顯示大小">
       <span>顯示大小</span><b id="zoomVal">100%</b>
@@ -64,6 +74,11 @@
 <!-- 顯示大小的級距選單 -->
 <div id="zoomPanel" hidden></div>
 
+<!-- 同步面板。跟 zoomPanel 一樣放在 body 底下而不是 #topbar 裡面：
+     topbar 有 backdrop-filter，會替裡面的固定定位元素另外開一層，
+     面板畫出來會霧掉、位置也變成相對於 topbar（截圖才看得出來） -->
+<div id="syncPanel" hidden></div>
+
 <!-- ☰ 選單 -->
 <div id="menuPanel" hidden>
   <button data-act="export">匯出資料</button>
@@ -90,6 +105,7 @@
 <script src="js/tabs.js"></script>
 <script src="js/theme.js"></script>
 <script src="js/pip.js"></script>
+<script src="js/drive.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
