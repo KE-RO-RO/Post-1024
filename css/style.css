@@ -1,0 +1,2058 @@
+/* ============================================================
+   便籤／常用語工具 — 樣式
+   沿用桌面版的暗色毛玻璃方向與莫蘭迪薰衣草紫強調色。
+   所有顏色集中在這裡的變數，之後要換色只改這一段就好。
+   ============================================================ */
+
+:root {
+  /* ---- 暗色（v4.8）----------------------------------------------------
+     底色、面板、文字三色由使用者在自訂配色裡調好後指定為預設：
+       底色 #58587e、面板 #242938、文字 #ffffff
+     其餘深淺（側欄後方、卡片底、滑過、提示框、次要與提示文字）是用
+     theme.js 同一套規則從這三色算出來再寫死在這裡，所以跟他當時在
+     面板裡看到的畫面一模一樣。強調色、色票、光暈維持薰衣草夜 II。
+     特色：底色比面板亮，側欄後方會比卡片區亮。                          */
+  color-scheme: dark;
+
+  --bg:            #58587e;
+  --bg-deep:       #40405c;
+  --panel:         rgba(36, 41, 56, 0.72);   /* #242938 */
+  --panel-solid:   #242938;
+  --panel-hover:   rgba(58, 62, 76, 0.85);
+  --border:        rgba(255, 255, 255, 0.13);
+  --border-strong: rgba(255, 255, 255, 0.18);
+
+  --text:          #ffffff;   /* 對卡片底色 8.8:1 */
+  --text-dim:      #c8c8d1;
+  --text-faint:    #9899a9;
+
+  --accent:        #c3b3e6;   /* 薰衣草紫 */
+  --accent-soft:   rgba(195, 179, 230, 0.30);
+  --accent-line:   rgba(195, 179, 230, 0.70);
+  --danger:        #c98b8b;
+  --ok:            #8fbfa4;
+
+  /* raise / sink 是方向性的顏色：暗底往亮疊、亮底往暗疊。
+     寫死 rgba(255,255,255,x) 的話換成亮底就整個消失，所以一定要走變數。 */
+  --raise-xs:      rgba(255,255,255,0.045);  /* 卡片底、列底的微亮 */
+  --raise-sm:      rgba(255,255,255,0.075);  /* hover 底色、中性小圓標 */
+  --raise-md:      rgba(255,255,255,0.12);   /* 捲軸拉桿 */
+
+  --sink-soft:     rgba(0,0,0,0.22);         /* 內縮區塊的底 */
+  --sink-strong:   rgba(0,0,0,0.28);
+  --field-bg:      rgba(0,0,0,0.30);         /* 輸入框 */
+  --overlay:       rgba(0,0,0,0.55);         /* 彈窗遮罩 */
+
+  --panel-alt:     rgba(78, 79, 112, 0.72);  /* 卡片等次要面板 */
+  --toast-bg:      rgba(66, 66, 95, 0.95);
+
+  --accent-hover:  rgba(195, 179, 230, 0.42);
+  --accent-mark:   rgba(195, 179, 230, 0.45); /* 搜尋命中的螢光 */
+  --accent-glow:   rgba(195, 179, 230, 0.13); /* 背景光暈 */
+  --glow-2:        rgba(140, 165, 190, 0.10);
+
+  --danger-soft:   rgba(201, 139, 139, 0.15);
+  --danger-fill:   rgba(201, 139, 139, 0.20);
+  --danger-hover:  rgba(201, 139, 139, 0.28);
+  --danger-line:   rgba(201, 139, 139, 0.40);
+  --danger-line-strong: rgba(201, 139, 139, 0.60);
+  --danger-text:   #e0b3b3;
+  --danger-text-strong: #e6bcbc;
+
+  --ok-soft:       rgba(143, 191, 164, 0.22);
+  --ok-line:       rgba(143, 191, 164, 0.50);
+  --warn:          #d9b98c;                  /* 倒數三天內的琥珀預警 */
+
+  --shadow:        0 6px 24px rgba(0, 0, 0, 0.35);
+  --picker-icon:   invert(0.7);              /* 日期欄的日曆小圖示：暗底要反白 */
+
+  /* ---- 色票（v4.7）----------------------------------------------------
+     卡片與分類貼紙共用。寫成 R,G,B 三個數字，才能在不同地方配不同透明度：
+     rgb(var(--c-x)) 是實色，rgba(var(--c-x), 0.2) 是淡底。
+     暗色版本統一調到對卡片底色約 7:1，米色、粉色才不會亮成白色；
+     可可刻意比較深（約 5:1），否則會跟奶茶褐撞成同一個顏色。          */
+  --c-green:  150, 178, 128;
+  --c-teal:   142, 177, 170;   /* #8eb1aa。v4.8 亮色的青換掉了，暗色維持原樣（使用者喜歡暗色版） */
+  --c-blue:   153, 170, 194;
+  --c-pink:   199, 161, 162;
+  --c-tea:    191, 165, 148;
+  --c-cocoa:  167, 136, 127;
+
+  /* 各處上色的濃淡。亮暗主題的最佳值不同，所以也是變數 */
+  --tint-badge-line: 0.22;   /* 細線版：小圓標底 */
+  --tint-head-full:  0.16;   /* 滿版：標題列底 */
+  --tint-badge-full: 0.30;   /* 滿版：小圓標底 */
+  --tint-cat:        0.16;   /* 分類貼紙 */
+  --tint-cat-on:     0.34;   /* 目前選中的分類貼紙 */
+
+  --cat-on-neutral:      195, 179, 230;   /* 沒設顏色的分類被選中時：跟強調色相同 */
+  --cat-on-neutral-a:    0.30;
+  --cat-on-neutral-line: 0.70;
+  --cat-on-neutral-short: var(--sink-strong);   /* 選中時代表字的底 */
+
+  --radius:        10px;
+  --radius-sm:     6px;
+}
+
+/* ---- 亮色：奶茶（v4.7）--------------------------------------------------
+   原本規劃的莫蘭迪亮色，面板色 #fdf9ee 的色相落在 44°（黃色區）、彩度 79%，
+   只是因為很亮才看起來接近白色；內容區、卡片疊兩層之後明顯偏黃。
+   奶茶版把中性色的色相移到 20～27°（紅褐色區），彩度壓在 32% 以下。
+   強調色維持藕紫；色邊都在卡片底色上 3:1 以上（可可 4.3:1）。            */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg:            #e9e1db;
+  --bg-deep:       #ddd3cb;   /* 側欄後方。太深的話側欄一整條會像髒污 */
+  --panel:         rgba(247, 243, 240, 0.72);
+  --panel-solid:   #f9f6f3;
+  --panel-hover:   rgba(252, 250, 248, 0.92);
+  --border:        rgba(60, 40, 30, 0.12);
+  --border-strong: rgba(60, 40, 30, 0.20);
+
+  --text:          #473d38;   /* 對卡片底色 9.4:1 */
+  --text-dim:      #6e625c;   /* 5.3:1 */
+  --text-faint:    #958a83;   /* 3.0:1，只用在提示文字 */
+
+  --accent:        #655c74;   /* 藕紫壓深，5.6:1 */
+  --accent-soft:   rgba(101, 92, 116, 0.14);
+  --accent-line:   rgba(101, 92, 116, 0.45);
+  --danger:        #a4504d;
+  --ok:            #5f8a70;
+
+  --raise-xs:      rgba(60, 40, 30, 0.028);
+  --raise-sm:      rgba(60, 40, 30, 0.055);
+  --raise-md:      rgba(60, 40, 30, 0.16);
+
+  --sink-soft:     rgba(60, 40, 30, 0.05);
+  --sink-strong:   rgba(60, 40, 30, 0.08);
+  --field-bg:      rgba(255, 255, 255, 0.55);
+  --overlay:       rgba(60, 45, 40, 0.35);
+
+  --panel-alt:     rgba(247, 243, 240, 0.72);
+  --toast-bg:      rgba(250, 247, 244, 0.97);
+
+  --accent-hover:  rgba(101, 92, 116, 0.22);
+  --accent-mark:   rgba(150, 128, 190, 0.32);
+  --accent-glow:   rgba(122, 114, 129, 0.10);
+  --glow-2:        rgba(176, 140, 120, 0.16);
+
+  --danger-soft:   rgba(164, 80, 77, 0.10);
+  --danger-fill:   rgba(164, 80, 77, 0.14);
+  --danger-hover:  rgba(164, 80, 77, 0.20);
+  --danger-line:   rgba(164, 80, 77, 0.35);
+  --danger-line-strong: rgba(164, 80, 77, 0.55);
+  --danger-text:   #9a4744;
+  --danger-text-strong: #8a3c3a;
+
+  --ok-soft:       rgba(95, 138, 112, 0.16);
+  --ok-line:       rgba(95, 138, 112, 0.45);
+  --warn:          #95672c;
+
+  --shadow:        0 3px 14px rgba(80, 55, 40, 0.10);
+  --picker-icon:   none;
+
+  --c-green:  128, 145, 115;   /* #809173 */
+  --c-teal:   182, 203, 188;   /* #b6cbbc 使用者指定（v4.8）：#bfd1c4 再深一點點，細線 1.5:1 */
+  --c-blue:   125, 141, 162;   /* #7d8da2 */
+  --c-pink:   178, 126, 128;   /* #b27e80 */
+  --c-tea:    168, 133, 110;   /* #a8856e */
+  --c-cocoa:  201, 180, 199;   /* #c9b4c7 藕荷，使用者指定（v4.8），取代亮色的可可；細線 1.7:1 */
+
+  --tint-badge-line: 0.20;
+  --tint-head-full:  0.20;
+  --tint-badge-full: 0.32;
+  --tint-cat:        0.20;
+  --tint-cat-on:     0.40;
+
+  /* #b29b8b 淺焦糖，實心色塊＋深字＋粗體（使用者指定，v4.8）。
+     側欄的色塊都是淡淡一層，淡到一定程度不管什麼色都很接近（實測色差 2～8），
+     所以「選中」要靠深淺差跳出來，而不是再換一個色相。深字對它 4.3:1。 */
+  --cat-on-neutral:      178, 155, 139;
+  --cat-on-neutral-a:    0.90;
+  --cat-on-neutral-line: 0;
+  --cat-on-neutral-short: rgba(255, 255, 255, 0.35);
+}
+
+* { box-sizing: border-box; }
+
+/* HTML 的 hidden 屬性只是瀏覽器預設樣式表裡的 display:none，
+   底下任何自己寫的 display 規則都會蓋掉它（例如 #modalBackdrop 的 display:grid），
+   結果就是元素明明有 hidden 卻照樣顯示出來。這條把它拉回來，
+   之後新增元件時也不必再擔心這個坑。 */
+[hidden] { display: none !important; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: "Microsoft JhengHei UI", "Microsoft JhengHei", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+}
+
+/* 淡淡的漸層底，讓毛玻璃有東西可以透 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 15% 10%, var(--accent-glow), transparent 45%),
+    radial-gradient(circle at 85% 85%, var(--glow-2), transparent 45%),
+    var(--bg);
+  z-index: -1;
+}
+
+#app { height: 100%; display: flex; flex-direction: column; }
+
+/* ---------- 頂部列 ---------- */
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.brand {
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+}
+.brand:hover { background: var(--accent-soft); }
+
+.spacer { flex: 1; }
+
+#searchBox {
+  width: 260px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--sink-soft);
+  color: var(--text);
+  outline: none;
+}
+#searchBox:focus { border-color: var(--accent-line); }
+#searchBox::placeholder { color: var(--text-faint); }
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 17px;
+  cursor: pointer;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+}
+.icon-btn:hover { background: var(--accent-soft); color: var(--text); }
+
+/* 搬到其他分類。跟選色點一樣滑鼠移到卡片才浮現——它不是常用動作，
+   常駐會讓標題列在窄卡片上擠成一團 */
+.move-btn {
+  opacity: 0;
+  transition: opacity 0.12s;
+  font-size: 14px;
+}
+.card:hover .move-btn,
+.move-btn:focus-visible { opacity: 1; }
+
+/* 搬移彈窗裡的分類清單 */
+.move-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+.move-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  background: var(--sink-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.move-item:hover:not(:disabled) { border-color: var(--accent-line); background: var(--accent-soft); }
+.move-item:disabled { opacity: 0.45; cursor: default; }
+.move-item .short {
+  flex: 0 0 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--sink-strong);
+  color: var(--accent);
+  font-size: 12px;
+}
+.move-item[data-color] .short { background: rgb(var(--tc)); color: var(--text); }
+.move-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- 主體 ---------- */
+#body { flex: 1; display: flex; min-height: 0; }
+
+/* ---------- 側欄 ---------- */
+#sidebar {
+  width: 132px;
+  flex: 0 0 132px;
+  padding: 14px 0 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow-y: auto;
+}
+
+/* 分類貼紙：只有左側圓角，沿用桌面版的視覺語言 */
+.cat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: var(--radius) 0 0 var(--radius);
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-dim);
+  position: relative;
+}
+.cat:hover { background: var(--panel-hover); color: var(--text); }
+.cat.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  border-right: none;
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.cat .short {
+  width: 22px; height: 22px;
+  flex: 0 0 22px;
+  display: grid; place-items: center;
+  background: var(--sink-strong);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--accent);
+}
+.cat .name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+.cat .more {
+  opacity: 0;
+  color: var(--text-faint);
+  padding: 0 2px;
+  font-size: 15px;
+}
+.cat:hover .more { opacity: 1; }
+.cat.dragging { opacity: 0.4; }
+.cat.drop-target { box-shadow: inset 0 3px 0 var(--accent); }
+/* 卡片被拖到這個分類上方：整格框起來，跟「調整分類順序」的插入線分開，
+   兩種拖曳意思不同，不能共用同一個記號（規格書 11.1） */
+.cat.drop-move {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: var(--accent-glow);
+  color: var(--text);
+}
+
+.cat-add {
+  margin-right: 0;
+  padding: 8px;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-right: none;
+  border-radius: var(--radius) 0 0 var(--radius);
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 15px;
+}
+.cat-add:hover { color: var(--accent); border-color: var(--accent-line); }
+
+/* ---------- 內容區 ---------- */
+#content {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 18px 24px;
+  overflow-y: auto;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-left: 1px solid var(--border);
+  border-top-left-radius: var(--radius);
+}
+
+#contentHeader {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+#currentCategoryName {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+}
+
+.btn-primary {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--text);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-primary:hover { background: var(--accent-hover); }
+
+.btn-plain {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-plain:hover { color: var(--text); border-color: var(--accent-line); }
+
+.btn-danger {
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line);
+  color: var(--danger-text);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn-danger:hover { background: var(--danger-hover); }
+
+.empty-hint {
+  color: var(--text-faint);
+  padding: 40px 0;
+  text-align: center;
+}
+
+/* ---------- 卡片網格 ---------- */
+/* 密集排版：列切得很細，由 app.js 的 layoutGrid() 算出每張卡片佔幾列。
+   縱向的空隙因此被壓掉，一張很長的卡片不會把旁邊的整排往下推。
+
+   **align-items: start 不要拿掉。** grid 預設會把格子裡的東西拉滿，卡片被
+   拉高之後量到的高度就變大，算出更大的佔格數再拉更高，會無限長下去。 */
+#cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  column-gap: 14px;
+  row-gap: 0;            /* 縱向間距算進佔格數裡，見 GRID_GAP */
+  grid-auto-rows: 2px;   /* 與 app.js 的 GRID_UNIT 一致 */
+  align-items: start;
+}
+
+/* 全域搜尋時的分類分組標題。卡片一離開自己的分類就看不出是哪來的，
+   所以每一組上面加一行分類名稱。橫跨整行，不佔卡片的格子 */
+.cat-group {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 -4px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.cat-group::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.cat-group:first-child { margin-top: 0; }
+/* 標題文字一律用 --text-dim。亮色色票是使用者挑過的低對比色（規格書 4.7），
+   12px 的小字直接染上去會讀不清楚，所以顏色只給那條線 */
+.cat-group[data-color]::after { background: rgb(var(--tc)); opacity: 0.55; }
+
+/* 搜尋時看到的是過濾後的結果，拖曳算出來的順序是錯的，所以把手直接不出現 */
+#cardGrid.searching .drag-handle,
+#cardGrid.searching .qp-grip { visibility: hidden; }
+
+.card {
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--raise-xs);
+}
+.card-type {
+  font-size: 11px;
+  color: var(--text);
+  background: var(--raise-sm);
+  padding: 2px 7px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+.card-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: text;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-title:hover { background: var(--raise-sm); }
+.card-head .icon-btn { font-size: 13px; padding: 2px 6px; }
+.card-body { padding: 10px; }
+
+/* 看起來像文字，點下去就能改 */
+.editable {
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: text;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 20px;
+}
+.editable:hover { background: var(--raise-sm); }
+.editable.placeholder { color: var(--text-faint); }
+
+textarea.inline-edit, input.inline-edit {
+  width: 100%;
+  background: var(--field-bg);
+  border: 1px solid var(--accent-line);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 4px 6px;
+  font: inherit;
+  outline: none;
+  resize: vertical;
+}
+
+/* ---------- 常用語：試算表式版面 ---------- */
+
+/* 常用語卡片橫跨整個網格，內容才有地方完整呈現 */
+.card-wide { grid-column: 1 / -1; }
+
+/* 標題列與資料列共用同一組欄寬定義。
+   原本兩邊各自用 flex 搭 flex-basis，只要有一邊的 border 或 padding 差一點點
+   欄位就會對不齊；改成 grid 之後對齊是版面規則保證的，不靠兩邊寫得一模一樣。 */
+.qp-head,
+.qp-row {
+  display: grid;
+  grid-template-columns: 18px 54px 200px 1fr 90px;
+  gap: 12px;
+  align-items: start;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+}
+
+.qp-head {
+  font-size: 11px;
+  color: var(--text-faint);
+  border-bottom-color: var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+  cursor: default;
+}
+
+.qp-row {
+  border-radius: var(--radius-sm);
+  border-bottom-color: var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.qp-row:hover { background: var(--raise-sm); border-color: var(--border); }
+.qp-row.copied {
+  background: var(--ok-soft);
+  border-color: var(--ok-line);
+}
+
+/* 標籤欄：固定寬度，像試算表的 A 欄 */
+.qp-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
+  border-right: 1px solid var(--border);
+  padding-right: 12px;
+}
+.qp-head .qp-label { font-weight: 400; font-size: 11px; color: var(--text-faint); }
+
+/* 內容欄：吃掉剩下的全部寬度 */
+.qp-content {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  max-height: 3.2em;      /* 大約兩行，超出的部分用展開鈕看 */
+  overflow: hidden;
+}
+.qp-head .qp-content { font-size: 11px; color: var(--text-faint); max-height: none; }
+.qp-row.expanded .qp-content { max-height: none; }
+
+.qp-label.placeholder,
+.qp-content.placeholder { color: var(--text-faint); font-weight: 400; }
+
+.qp-actions,
+.qp-actions-space {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.row-hint {
+  color: var(--text-faint);
+  padding: 10px 2px;
+  font-size: 12px;
+}
+
+.row-add {
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 12px;
+}
+.row-add:hover { color: var(--accent); border-color: var(--accent-line); }
+
+/* ---------- 待辦 ---------- */
+.todo-row { display: flex; align-items: flex-start; gap: 8px; padding: 4px 2px; }
+.todo-row input[type=checkbox] { margin-top: 4px; accent-color: var(--accent); }
+.todo-row .editable { flex: 1; }
+.todo-row.done .editable { text-decoration: line-through; color: var(--text-faint); }
+
+/* ---------- 連結 ---------- */
+.link-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; }
+.link-row a {
+  color: var(--accent);
+  text-decoration: none;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-row a:hover { text-decoration: underline; }
+
+/* 刪除鈕：平常不搶眼，滑過才轉紅，降低誤點機率 */
+.icon-btn.danger-btn:hover {
+  background: var(--danger-fill);
+  color: var(--danger-text-strong);
+}
+
+.date-picker {
+  width: 100%;
+  margin-top: 10px;
+  padding: 5px 8px;
+  background: var(--field-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+.date-picker:focus { border-color: var(--accent-line); }
+
+/* ---------- 倒數 ---------- */
+/* v4.10：卡片層級的大數字與日期行拿掉了，日期搬到每一筆任務身上。
+   分組標題與時間標的樣式在下面的 v4.10 區塊。 */
+
+/* ---------- 提示 ---------- */
+#toast {
+  position: fixed;
+  bottom: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--toast-bg);
+  border: 1px solid var(--accent-line);
+  color: var(--text);
+  padding: 9px 20px;
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  z-index: 300;
+  font-size: 13px;
+}
+#toast.err { border-color: var(--danger-line-strong); color: var(--danger-text-strong); }
+
+/* ---------- 彈窗 ---------- */
+#modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  display: grid;
+  place-items: center;
+  z-index: 200;
+}
+/* 彈窗最高不超過畫面：裡面的 textarea 是可以用滑鼠拉大的，拉過頭時
+   整個彈窗會被撐出畫面，底下的按鈕就跑到看不到也點不到的地方，而且
+   背景是 overflow:hidden 的，捲也捲不到。改成標題與按鈕固定、
+   中間那段自己捲。 */
+#modal {
+  width: min(440px, 90vw);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+#modalTitle, #modalFooter { flex: 0 0 auto; }
+#modalTitle {
+  padding: 13px 16px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+#modalBody { padding: 16px; flex: 1 1 auto; overflow-y: auto; }
+/* 只讓它直的拉，橫的拉會把彈窗撐寬 */
+#modalBody textarea { resize: vertical; }
+#modalBody label { display: block; margin-bottom: 5px; color: var(--text-dim); font-size: 12.5px; }
+/* 用排除法而不是逐一列出型別：原本只列 text/date/url，
+   漏掉 password 導致私人卡片的密碼欄完全沒吃到樣式（縮成預設窄框、
+   沒有下緣，又被 .field-hint 的負 margin 蓋住）。
+   只有 checkbox / radio / file 需要保留瀏覽器原生外觀。 */
+#modalBody input:not([type=checkbox]):not([type=radio]):not([type=file]),
+#modalBody textarea {
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--field-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  margin-bottom: 12px;
+}
+#modalBody input:focus, #modalBody textarea:focus { border-color: var(--accent-line); }
+#modalFooter {
+  padding: 12px 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.type-opt {
+  padding: 12px 10px;
+  background: var(--sink-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+.type-opt:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+.type-opt small { display: block; color: var(--text-faint); font-size: 11px; margin-top: 3px; }
+.type-opt[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+/* ---------- ☰ 選單 ---------- */
+#menuPanel {
+  position: fixed;
+  top: 46px;
+  right: 14px;
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  z-index: 250;
+  padding: 5px;
+  min-width: 150px;
+}
+#menuPanel button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+#menuPanel button:hover { background: var(--accent-soft); }
+#menuPanel hr { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+
+/* ---------- 捲軸 ---------- */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--raise-md); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-hover); }
+
+/* 搜尋命中 */
+mark { background: var(--accent-mark); color: var(--text); border-radius: 2px; }
+
+/* ============================================================
+   v2.2 新增：拖曳把手、釘選、複製鍵欄位
+   ============================================================ */
+
+.drag-handle {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  cursor: grab;
+  padding: 0 2px;
+  font-size: 13px;
+  letter-spacing: -1px;
+  user-select: none;
+}
+.drag-handle:hover { color: var(--accent); }
+.drag-handle:active { cursor: grabbing; }
+
+.card.dragging { opacity: 0.35; }
+.card.drop-target { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 釘選只靠實心 ★ 與排在最前面。v4.7 以前另有一條左邊框，
+   但細線版的類型色邊也在左側，兩種意思擠在同一條線上會分不出來。 */
+.icon-btn.pin-on { color: var(--accent); }
+
+/* 複製鍵欄位：比原本的序號寬，要塞得下 Alt+A */
+.qp-index {
+  height: 20px;
+  justify-self: start;
+  padding: 0 7px;
+  display: grid; place-items: center;
+  font-size: 10.5px;
+  color: var(--accent);
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 1px;
+  white-space: nowrap;
+}
+.qp-index.unset { background: transparent; border-color: transparent; }
+.qp-head .qp-index {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  padding: 0;
+}
+
+/* 複製鍵錄製 */
+.key-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.key-box {
+  flex: 1;
+  padding: 7px 10px;
+  background: var(--field-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: center;
+}
+.key-box:hover { border-color: var(--accent-line); }
+.key-box.unset { color: var(--text-faint); }
+.key-box.recording {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.key-err {
+  color: var(--danger-text);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-bottom: 10px;
+}
+
+/* ============================================================
+   v2.3 新增：連結收藏的批次開啟
+   ============================================================ */
+
+.link-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.link-bar .spacer { flex: 1; }
+
+.link-mini {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+}
+.link-mini:hover { color: var(--text); border-color: var(--accent-line); }
+
+.link-open { font-size: 12px; padding: 4px 12px; }
+.link-open:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.link-check { accent-color: var(--accent); flex: 0 0 auto; cursor: pointer; }
+
+.link-badge {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  background: var(--sink-soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.link-badge.warn { color: var(--danger-text); background: var(--danger-soft); }
+
+.field-hint {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.6;
+  margin: -6px 0 12px;
+}
+
+/* ============================================================
+   v2.5：倒數提醒補強
+   ============================================================ */
+
+/* 整個欄位都可點，不是只有右邊那顆小日曆圖示 */
+.date-picker { cursor: pointer; }
+.date-picker:hover { border-color: var(--accent-line); }
+.date-picker::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  filter: var(--picker-icon);
+}
+
+
+/* ============================================================
+   v2.6：常用語列的拖曳把手、動作鈕尺寸統一
+   ============================================================ */
+
+.qp-grip {
+  color: var(--text-faint);
+  cursor: grab;
+  font-size: 12px;
+  line-height: 20px;
+  letter-spacing: -1px;
+  user-select: none;
+  opacity: 0;
+  text-align: center;
+}
+.qp-row:hover .qp-grip { opacity: 1; }
+.qp-grip:hover { color: var(--accent); }
+.qp-grip:active { cursor: grabbing; }
+
+.qp-row.dragging { opacity: 0.35; }
+.qp-row.row-drop-target { box-shadow: inset 0 2px 0 var(--accent); }
+
+/* 展開鈕與鉛筆、✕ 的字面大小差異很大（▸、⌄ 這類符號在多數字型裡偏小），
+   所以不靠字元本身撐版面，一律給固定尺寸的方框再置中（11.5）。
+
+   範圍是「卡片內容區裡的所有動作鈕」，用排除法而不是一個個列舉——
+   之後新增卡片類型時自動適用，不會又冒出一顆大小不一樣的按鈕（11.3）。
+   標題列的按鈕不在此列，那是另一個層級、本來就比較大。 */
+.card-body .icon-btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+/* ============================================================
+   v2.8：說明鈕
+   ------------------------------------------------------------
+   ⓘ 這類「圈起來的字」字元在不同字型底下大小、粗細、垂直位置差很多，
+   常常糊成一團。改成自己畫一個圓框放普通字元，外觀就穩定了。
+   ============================================================ */
+
+.icon-btn.help-btn {
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 600;
+}
+.icon-btn.help-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+/* ============================================================
+   v3.0：私人卡片
+   ============================================================ */
+
+.card-type-editable { cursor: text; }
+.card-type-editable:hover { background: var(--accent-hover); }
+
+.locked-body {
+  padding: 22px 16px;
+  text-align: center;
+}
+.locked-icon { color: var(--text-faint); line-height: 1; }
+.locked-text {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 10px 0 14px;
+}
+
+/* ---- 單筆項目 ---- */
+
+.pv-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 10px;
+  margin-bottom: 8px;
+  background: var(--raise-xs);
+}
+.pv-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+/* 摺疊時沒有下方內容，留著 margin 會讓列高多出一截 */
+.pv-head.collapsed { margin-bottom: 0; }
+
+.pv-tri { color: var(--text-faint); }
+
+.pv-memo-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+.pv-memo-actions .icon-btn { width: 24px; height: 22px; padding: 0; }
+
+/* 型別二選一。做成一整條分段控制，不用兩顆分開的按鈕，
+   讓「只能選一個」在視覺上就講清楚 */
+.kind-seg {
+  display: flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.kind-seg button {
+  flex: 1;
+  padding: 6px 0;
+  background: none;
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.kind-seg button:last-child { border-right: none; }
+.kind-seg button:hover { background: var(--panel-hover); }
+.kind-seg button.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.pv-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pv-head .icon-btn,
+.pv-field .icon-btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.pv-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+.pv-label {
+  flex: 0 0 34px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.pv-value {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pv-value.secret { letter-spacing: 2px; color: var(--text-faint); }
+
+.pv-note {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- 復原金鑰 ---- */
+
+.recovery-key {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 15px;
+  letter-spacing: 1px;
+  text-align: center;
+  color: var(--accent);
+  background: var(--field-bg);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  padding: 14px 10px;
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+
+.modal-links {
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-top: -4px;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px;
+  text-decoration: underline;
+}
+.link-btn:hover { color: var(--accent); }
+.link-btn.danger:hover { color: var(--danger-text); }
+
+/* ============================================================
+   v4.7：主題、色票、卡片上色
+   ------------------------------------------------------------
+   卡片與分類只帶 data-color="teal" 這樣的色票名，實際顏色由上面
+   的 --c-* 決定。先把色票名對應到 --tc，後面的規則只認 --tc。
+   ============================================================ */
+
+[data-color="green"] { --tc: var(--c-green); }
+[data-color="teal"]  { --tc: var(--c-teal); }
+[data-color="blue"]  { --tc: var(--c-blue); }
+[data-color="pink"]  { --tc: var(--c-pink); }
+[data-color="tea"]   { --tc: var(--c-tea); }
+[data-color="cocoa"] { --tc: var(--c-cocoa); }
+
+/* ---- 細線版：左緣 4px 色邊＋小圓標淡底 ----
+   用 inset 陰影而不是 border-left，才不會推動內容、也不影響圓角。 */
+:root:not([data-card-style="full"]) .card[data-color] {
+  box-shadow: inset 4px 0 0 rgb(var(--tc)), var(--shadow);
+}
+:root:not([data-card-style="full"]) .card[data-color] .card-type {
+  background: rgba(var(--tc), var(--tint-badge-line));
+}
+
+/* ---- 滿版：整條標題列上色 ---- */
+:root[data-card-style="full"] .card[data-color] .card-head {
+  background: rgba(var(--tc), var(--tint-head-full));
+}
+:root[data-card-style="full"] .card[data-color] .card-type {
+  background: rgba(var(--tc), var(--tint-badge-full));
+}
+
+/* ---- 分類貼紙：完整色塊，側欄是導覽區，本來就該顯眼 ---- */
+.cat[data-color] {
+  background: rgba(var(--tc), var(--tint-cat));
+  box-shadow: inset 3px 0 0 rgb(var(--tc));
+}
+.cat[data-color]:hover { background: rgba(var(--tc), var(--tint-cat-on)); }
+.cat.active[data-color] {
+  background: rgba(var(--tc), var(--tint-cat-on));
+  border-color: rgba(var(--tc), 0.60);
+  box-shadow: inset 3px 0 0 rgb(var(--tc));
+  font-weight: 600;
+}
+.cat[data-color] .short { color: var(--text); }
+
+/* ---- 卡片標題列的選色點：平常隱藏，滑鼠移到卡片才出現 ---- */
+.color-dot {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  margin: 0 3px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.color-dot[data-color] { background: rgb(var(--tc)); border-color: transparent; }
+.card:hover .color-dot,
+.color-dot:focus-visible { opacity: 1; }
+.color-dot:hover { box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* ---- 色票按鈕（選色視窗與分類選項共用）---- */
+.swatch-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background: rgb(var(--tc));
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.swatch:hover { transform: scale(1.1); }
+/* 中性用斜紋表示「沒有顏色」，不是灰色——灰色看起來像一個顏色 */
+.swatch.neutral {
+  background: repeating-linear-gradient(45deg, var(--raise-md) 0 3px, transparent 3px 6px);
+  border-color: var(--border-strong);
+}
+.swatch.sel { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+#modalBody .swatch-title { margin-top: 10px; }
+
+.color-pop {
+  position: fixed;
+  z-index: 260;
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 9px 11px 11px;
+  width: 262px;
+}
+.color-pop-follow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 9px;
+  margin-bottom: 9px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.color-pop-text { color: var(--text); }
+.color-pop-hint { margin-left: auto; color: var(--text-faint); font-size: 11.5px; }
+
+/* 私人卡片的小圓標可以點了改字，所以同時掛著 .editable。
+   v4.6 以前 .editable 的 padding 與圓角蓋掉了圓標外觀，
+   結果只有它是方角、比別的圓標大一圈——反而讓私人卡片變顯眼。 */
+.card-type.editable {
+  padding: 2px 7px;
+  border-radius: 999px;
+  min-height: 0;
+}
+
+/* 沒有設定顏色的分類被選中時。顏色與濃淡都是變數，自訂配色可以調。
+   暗色的預設值就是強調色（跟 v4.7 以前完全相同）；亮色是淺焦糖實心色塊（v4.8）。 */
+.cat.active:not([data-color]) {
+  background: rgba(var(--cat-on-neutral), var(--cat-on-neutral-a));
+  border-color: rgba(var(--cat-on-neutral), var(--cat-on-neutral-line));
+  box-shadow: inset 3px 0 0 rgb(var(--cat-on-neutral));
+}
+.cat.active:not([data-color]) .short { background: var(--cat-on-neutral-short); }
+
+/* 亮色：所有被選中的分類都是粗體（有顏色的本來就是），代表字改深色。
+   只寫在亮色，暗色維持原樣。 */
+:root[data-theme="light"] .cat.active:not([data-color]) { font-weight: 600; color: var(--text); }
+:root[data-theme="light"] .cat.active:not([data-color]) .short { color: var(--text); }
+
+/* ============================================================
+   v4.8：自訂配色面板（右側滑出）
+   ------------------------------------------------------------
+   不用共用彈窗：彈窗會蓋住畫面，看不到改色的效果。
+   面板打開時整頁往左縮，所有東西都還看得到。
+   ============================================================ */
+
+body.drawer-open #app { margin-right: 356px; }
+
+.cz-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 356px;
+  z-index: 150;          /* 低於彈窗（200），「外觀」彈窗還是能蓋在上面 */
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-solid);
+  border-left: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+.cz-head {
+  display: flex;
+  align-items: center;
+  padding: 10px 10px 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.cz-head strong { flex: 1; font-size: 14.5px; }
+.cz-sub { padding: 8px 16px 0; font-size: 11.5px; color: var(--text-faint); line-height: 1.6; }
+.cz-body { flex: 1; overflow-y: auto; padding: 2px 16px 16px; }
+
+.cz-group {
+  display: flex;
+  align-items: baseline;
+  margin: 16px 0 4px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.cz-group small { margin-left: auto; font-weight: 400; font-size: 11px; color: var(--text-faint); }
+.cz-subgroup { margin: 12px 0 2px; font-size: 11.5px; color: var(--text-faint); }
+
+.cz-row {
+  display: grid;
+  grid-template-columns: 1fr 28px 78px 52px 20px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.cz-name { color: var(--text); line-height: 1.35; }
+.cz-name small { display: block; font-size: 10.5px; color: var(--text-faint); }
+.cz-row.mod .cz-name::after { content: " ●"; color: var(--accent); font-size: 9px; vertical-align: 2px; }
+
+/* 只有滑桿的列（濃淡），名稱佔滿前三欄 */
+.cz-row:not(:has(.cz-picker)) .cz-name { grid-column: 1 / 4; }
+
+.cz-picker {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+.cz-picker::-webkit-color-swatch-wrapper { padding: 2px; }
+.cz-picker::-webkit-color-swatch { border: none; border-radius: 4px; }
+.cz-picker::-moz-color-swatch { border: none; border-radius: 4px; }
+
+.cz-hex {
+  width: 100%;
+  padding: 4px 6px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--field-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  outline: none;
+}
+.cz-hex:focus { border-color: var(--accent-line); }
+.cz-hex.bad { border-color: var(--danger-line-strong); }
+
+.cz-ratio { font-size: 11px; color: var(--text-faint); text-align: right; white-space: nowrap; }
+.cz-ratio.bad { color: var(--danger-text); }
+
+.cz-reset {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 13px;
+  visibility: hidden;
+}
+.cz-reset:hover { color: var(--accent); }
+
+.cz-slider {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.cz-slider input { flex: 1; accent-color: var(--accent); }
+.cz-pct { width: 34px; text-align: right; }
+
+.cz-warn {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  border-radius: 5px;
+  padding: 4px 8px;
+}
+
+.cz-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+}
+.cz-foot small { font-size: 11px; color: var(--text-faint); }
+
+.appearance-more { width: 100%; margin-top: 4px; }
+
+/* ---- 配色套組（v4.8）---- */
+.cz-slots { margin-bottom: 4px; }
+.cz-factory { display: flex; gap: 6px; margin-bottom: 8px; }
+.cz-factory .btn-plain { flex: 1; padding: 5px 0; font-size: 12px; }
+.cz-factory .btn-plain.on,
+.quick-slots .btn-plain.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+
+.cz-slot-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.cz-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 7px 7px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--raise-sm);
+  cursor: pointer;
+  min-height: 108px;
+}
+.cz-slot:hover { border-color: var(--accent-line); }
+.cz-slot.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.cz-slot.empty { border-style: dashed; background: none; cursor: default; justify-content: center; }
+.cz-slot.empty .cz-slot-name { color: var(--text-faint); font-weight: 400; }
+.cz-slot-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.cz-slot-name span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cz-slot-edit {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 11px;
+}
+.cz-slot-edit:hover { color: var(--accent); }
+.cz-slot-meta { font-size: 10.5px; color: var(--text-faint); margin: 2px 0 5px; line-height: 1.4; }
+.cz-slot-dots { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 6px; }
+.cz-slot-dots i { width: 11px; height: 11px; border-radius: 50%; border: 1px solid var(--border-strong); }
+.cz-slot-save {
+  margin-top: auto;
+  padding: 3px 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.cz-slot-save:hover { color: var(--text); border-color: var(--accent-line); }
+.cz-slot-mod {
+  position: absolute;
+  top: -8px;
+  right: 6px;
+  padding: 0 6px;
+  font-size: 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--panel-solid);
+}
+
+.quick-slots { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.quick-slots .btn-plain { display: flex; align-items: center; gap: 5px; padding: 5px 10px; font-size: 12px; }
+.quick-slots i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+/* ============================================================
+   置頂小視窗（Document PiP）
+   ------------------------------------------------------------
+   小視窗是另一份文件，套的是同一份樣式表，靠 <html data-pip> 區分。
+   下面的規則在主視窗完全不會生效（主視窗沒有 data-pip，也沒有 #pipRoot）。
+   ============================================================ */
+
+:root[data-pip], :root[data-pip] body { height: 100%; }
+:root[data-pip] body {
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  background: var(--bg);
+}
+#pipRoot { min-height: 100%; }
+#pipRoot .card { width: auto; margin: 0; }
+/* 常用語在主視窗橫跨整行，小視窗裡沒有那個寬度可以橫跨 */
+#pipRoot .card-wide { grid-column: auto; }
+
+/* 預設拒絕：沒有明確標 pip-ok 的操作按鈕一律不出現。
+   方向是刻意的——日後新增卡片類型時忘了標記，只會少一顆按鈕，
+   不會在唯讀的小視窗裡冒出一顆刪除鍵（對照 11.3 的列舉法問題） */
+#pipRoot .icon-btn:not(.pip-ok),
+#pipRoot .row-add,
+#pipRoot .color-dot { display: none; }
+
+/* 把手改用 visibility 而不是 display:none。
+   常用語的標題列與資料列是 grid，display:none 會讓後面的欄位整排往前遞補一格，
+   結果「複製鍵」跟「標籤」疊在一起。visibility 保留格子，只是看不見。 */
+#pipRoot .drag-handle,
+#pipRoot .qp-grip { visibility: hidden; }
+
+/* 小視窗裡的密碼輸入。主視窗的彈窗在這裡看不到，只能自己做一份 */
+.pip-ask {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--overlay);
+}
+.pip-ask-box {
+  width: 100%;
+  max-width: 300px;
+  padding: 16px;
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.pip-ask-box h3 { margin: 0 0 10px; font-size: 14px; color: var(--text); }
+.pip-ask-box input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+}
+.pip-ask-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
+/* 常用語在小視窗裡只剩三欄。把手與動作欄被隱藏了，但 grid 的軌道還在，
+   不把它們歸零的話標籤欄會被擠到跟複製鍵重疊（標題列與資料列共用同一組
+   grid-template-columns，所以改一次兩邊一起對齊，見 11.4） */
+:root[data-pip] .qp-head,
+:root[data-pip] .qp-row {
+  grid-template-columns: 0 42px minmax(52px, 0.9fr) 1.6fr 22px;
+  gap: 8px;
+  padding: 7px 6px;
+}
+
+/* 卡片標題列：⋯ 與彈出鈕 */
+.more-btn, .card-head .icon-btn.pip-on { opacity: 1; }
+.card-head .pip-on { color: var(--accent); }
+.danger-opt { color: var(--danger); }
+.danger-opt:hover { border-color: var(--danger); background: var(--danger-soft); }
+
+
+/* ============================================================
+   v4.10：倒數提醒改成「每一筆各自有日期與時間」
+   ============================================================ */
+
+/* 分組標題：一天一組，日期只寫一次 */
+.cd-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.cd-group::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.cd-group:first-child { margin-top: 2px; }
+.cd-group.soon { color: var(--warn); }
+.cd-group.overdue { color: var(--danger); }
+.cd-group.muted { color: var(--text-faint); font-weight: 400; }
+
+.cd-row { align-items: center; }
+
+/* 時間標：點了開日期時間的編輯彈窗。
+   顏色跟著這一筆的狀態走——同一天裡已經過了時間的那幾筆會先轉紅，
+   組標題仍是「今天」，兩者說的是不同層級的事 */
+.cd-chip {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--sink-soft);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.6;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cd-chip:hover { border-color: var(--accent-line); color: var(--text); }
+/* 沒設時間的那些平常不出現：多數任務只需要日期，一整排虛線的「時間」
+   會蓋過真正有時間的那幾筆。滑鼠移到該列才浮現，位置保留著不讓版面跳動 */
+.cd-chip.unset {
+  color: var(--text-faint);
+  border-style: dashed;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.cd-row:hover .cd-chip.unset,
+.cd-chip.unset:focus-visible { opacity: 1; }
+.cd-chip.soon { color: var(--warn); border-color: var(--warn); }
+.cd-chip.overdue { color: var(--danger); border-color: var(--danger); }
+.todo-row.done .cd-chip { opacity: 0.45; }
+/* 權重要跟上面那條一樣高，不然已完成的那幾列會蓋掉「沒設時間就先藏起來」 */
+.todo-row.done .cd-chip.unset { opacity: 0; }
+.todo-row.done:hover .cd-chip.unset { opacity: 0.45; }
+
+/* 側欄的到期小紅點。
+   絕對定位疊在 ⋯ 的位置上：⋯ 平常只是透明（opacity:0），版面空間本來就
+   留著了，疊上去不佔額外寬度。用 flex 排的話分類名稱會被擠成「常…」。
+   滑鼠移上去時讓位給 ⋯。 */
+.cat { position: relative; }
+.cat-due {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: var(--danger);
+  pointer-events: none;
+}
+.cat:hover .cat-due { display: none; }
+
+
+/* ============================================================
+   v4.11：便籤改成多筆、清除已完成
+   ============================================================ */
+
+.nt-item {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  margin-bottom: 4px;
+}
+.nt-item + .nt-item { border-top: 1px solid var(--border); border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
+.nt-item.dragging { opacity: 0.4; }
+.nt-item.row-drop-target { border-color: var(--accent); }
+
+.nt-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 0;
+}
+.nt-head:hover { background: var(--raise-sm); border-radius: var(--radius-sm); }
+
+/* 平常隱藏，滑鼠移到這一筆才浮現。跟卡片與常用語列同一套做法 */
+.nt-grip {
+  flex: 0 0 16px;
+  text-align: center;
+  color: var(--text-faint);
+  cursor: grab;
+  opacity: 0;
+  font-size: 12px;
+  user-select: none;
+}
+.nt-item:hover .nt-grip { opacity: 1; }
+
+.nt-tri { opacity: 1; }
+/* 展開鈕在最右邊，跟刪除排在一起；標題列左邊整條留給內容 */
+.nt-summary { padding-left: 2px; }
+
+/* 展開時標題列是空的（第一行在底下的內容區裡），所以把它壓扁，
+   複製與刪除移到滑鼠移上去才出現，不讓每一筆都頂著一條空白列 */
+.nt-item.open .nt-head { padding-bottom: 0; }
+.nt-item.open .nt-head .icon-btn:not(.nt-tri) { opacity: 0; transition: opacity 0.12s; }
+.nt-item.open:hover .nt-head .icon-btn:not(.nt-tri),
+.nt-item.open .nt-head .icon-btn:focus-visible { opacity: 1; }
+
+/* 摺疊時顯示內容的第一行；展開時這裡是空的，因為底下已經看得到了 */
+.nt-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text);
+  cursor: default;
+}
+.nt-summary.placeholder { color: var(--text-faint); }
+
+/* 記住的高度同時套在這裡與編輯框上，長內容不會把卡片撐成一整頁 */
+.nt-body {
+  padding: 2px 6px 6px 6px;
+  overflow: auto;
+}
+
+/* 編輯中把上限拿掉。上限是給「顯示」用的，編輯時還罩著的話，
+   編輯框拉高也只是在容器裡捲動，使用者看到的是「拉不動」。
+   要 !important 才蓋得過 JS 寫在 style 屬性上的 max-height。 */
+.nt-body[data-editing="1"] {
+  max-height: none !important;
+  overflow: visible;
+}
+
+.clear-done { margin-top: 4px; color: var(--text-faint); }
+.clear-done:hover { color: var(--danger); border-color: var(--danger); }
+
+
+/* ============================================================
+   v4.13：顯示大小
+   ============================================================ */
+
+.zoom-one {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 6px;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.zoom-one:hover { border-color: var(--accent-line); color: var(--text); }
+.zoom-one b { color: var(--text); font-weight: 600; }
+
+#zoomPanel {
+  position: fixed;
+  top: 44px;
+  right: 56px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+#zoomPanel button {
+  padding: 5px 16px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+#zoomPanel button:hover { background: var(--accent-soft); color: var(--text); }
+#zoomPanel button.on { color: var(--accent); font-weight: 600; }
+
+
+/* ============================================================
+   v4.14：捲動不要傳到背景
+   ------------------------------------------------------------
+   在編輯框或面板裡捲到底之後，捲動會繼續傳給外層的 #content，整個卡片區
+   跟著跑掉——正在編輯的框就滑出視線了。`overscroll-behavior: contain`
+   讓捲動停在自己這一層。
+
+   **新增會自己捲動的區域時，記得也加進下面這份名單。** CSS 沒辦法用
+   「有沒有在捲動」當條件來選元素，只能列舉。
+   ============================================================ */
+
+textarea,
+.nt-body,
+#modalBody,
+.cz-body,
+#menuPanel,
+#zoomPanel,
+.color-pop { overscroll-behavior: contain; }
+
+
+/* ============================================================
+   v4.15：卡片收合
+   ------------------------------------------------------------
+   收合鈕在標題列右邊那一排、⋯ 的左邊。收合後只剩一條標題列，內容區
+   整個藏起來；密集排版的 ResizeObserver 盯的就是卡片本身，高度自己會
+   重算，不必另外通知。
+
+   用 display:none 而不是 visibility:hidden：這裡要的就是「不佔位置」，
+   跟小視窗藏把手那個情況（要保留 grid 格子，見規格書 11.24）相反。
+   ============================================================ */
+
+.card.is-collapsed .card-body { display: none; }
+/* 底下沒有東西了，那條分隔線會變成浮在半空中的一條線 */
+.card.is-collapsed .card-head { border-bottom: none; }
+
+/* 收合的倒數卡片：裡面還有今天到期或已過期的未完成任務就浮一顆小紅點。
+   跟側欄的 .cat-due 同一個意思，但這裡跟著文字排，不用絕對定位——
+   標題列本來就是 flex，插一顆 7px 的點不會擠掉任何東西。 */
+.card-due {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  margin: 0 2px;
+  border-radius: 50%;
+  background: var(--danger);
+  pointer-events: none;
+}
+
+
+/* ============================================================
+   v4.15：編碼卡（codegen）
+   ------------------------------------------------------------
+   兩個虛線框：上面「填寫」、下面「產出」。所有標籤都靠左對齊，
+   起點一致（11.4：一欄靠左一欄靠右，看起來就是歪的）。
+
+   這裡沒有任何內容，只有版面。選項名稱、文案、標籤全部是資料。
+   ============================================================ */
+
+.gen-zone {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 12px 13px;
+  margin-bottom: 11px;
+}
+.gen-zone:last-child { margin-bottom: 0; }
+.gen-zone-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+  margin-bottom: 9px;
+}
+
+.gen-block { margin-bottom: 11px; }
+.gen-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+/* 標籤那一行帶了收合鈕時，三個東西排成一列並對齊 */
+.gen-label-row { display: flex; align-items: center; gap: 2px; }
+/* 動作鈕維持 24×22（4.10），靠負邊界把它跟標籤拉近，不改按鈕本身的尺寸 */
+.gen-label-row .gen-fold { margin-left: -6px; margin-right: -3px; }
+.gen-fold-count { font-weight: 400; color: var(--text-faint); }
+.gen-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+/* 高度不能由字元本身決定（11.5 的同一個坑）：line-height 是 normal 時，
+   純英文的名稱落在西文字型、中文落在中文字型，兩者度量不同，
+   同一排按鈕會差 3px、字也不在同一條基線上。固定行高＋置中容器之後，
+   裡面填什麼字都一樣高。 */
+.gen-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 18px;
+  font-size: 12.5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--raise-sm);
+  color: var(--text);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.gen-chip:hover { border-color: var(--border-strong); }
+.gen-chip.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.gen-chip.gen-manage {
+  border-style: dashed;
+  color: var(--text-faint);
+}
+
+.gen-field { display: flex; align-items: center; gap: 8px; }
+.gen-field-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  flex: 0 0 auto;
+}
+.gen-input {
+  flex: 1;
+  font-size: 12.5px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.gen-result { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.gen-value {
+  font-size: 14.5px;
+  letter-spacing: 1px;
+  color: var(--text);
+}
+/* 還沒湊齊時整串淡掉，一眼看得出這不是可以交出去的東西 */
+.gen-value-empty { color: var(--text-faint); font-weight: 500; }
+.gen-copy {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-weight: 700;
+  cursor: pointer;
+}
+.gen-copy:disabled {
+  background: var(--raise-sm);
+  border-color: var(--border);
+  color: var(--text-faint);
+  font-weight: 400;
+  cursor: default;
+}
+
+.gen-text {
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--sink-soft);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+}
+.gen-text:hover { border-color: var(--border-strong); }
+.gen-text-empty { color: var(--text-faint); cursor: default; }
+.gen-text-empty:hover { border-color: var(--border); }
+.gen-tip {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-top: 6px;
+}
+
+/* 管理彈窗 */
+.gen-manage-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+.gen-manage-name { flex: 1; font-size: 13px; color: var(--text); }
+
+/* 管理清單的拖曳把手。跟常用語列同一套，但這裡常駐顯示——
+   彈窗裡的列不像卡片那樣有 hover 的前後文，藏起來不容易被發現 */
+.gen-grip {
+  color: var(--text-faint);
+  cursor: grab;
+  font-size: 12px;
+  line-height: 20px;
+  letter-spacing: -1px;
+  user-select: none;
+  width: 18px;
+  text-align: center;
+  flex: 0 0 auto;
+}
+.gen-grip:hover { color: var(--accent); }
+.gen-grip:active { cursor: grabbing; }
+.gen-manage-row.dragging { opacity: 0.35; }
+.gen-manage-row.row-drop-target { box-shadow: inset 0 2px 0 var(--accent); }
+.gen-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  margin-top: 10px;
+  cursor: pointer;
+}
+
+/* 表單卡：一鍵清空跟在提示後面，不另外佔一行 */
+.gen-tip .gen-clear {
+  margin-left: 10px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+}
+
+/* 選項那一排底下如果接著輸入欄（例如單向的附註），要留間距，
+   不然標籤按鈕會跟輸入框黏在一起 */
+.gen-block .gen-chips + .gen-field { margin-top: 7px; }
+
+/* 直接掛在區塊上的選項排（表單卡的模式），底下接輸入欄時要留間距 */
+.gen-zone > .gen-chips { margin-bottom: 11px; }
+
+/* ============================================================
+   最近刪除
+   ============================================================ */
+
+.trash-row { align-items: flex-start; padding: 8px 0; }
+.trash-main { flex: 1; min-width: 0; }
+.trash-name {
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trash-meta {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+/* ============================================================
+   瀏覽器儲存空間（☰ 選單裡）
+   ============================================================ */
+
+#menuQuota { padding: 7px 12px 10px; }
+#menuQuotaText {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 5px;
+}
+#menuQuotaText b { color: var(--text); font-weight: 700; }
+.qbar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--sink-soft);
+  overflow: hidden;
+}
+.qbar-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--accent);
+}
+/* 快滿了才換顏色。平常不吵人，門檻到了要一眼看出來 */
+.qbar-fill[data-level="warn"] { background: var(--warn); }
+.qbar-fill[data-level="full"] { background: var(--danger); }
