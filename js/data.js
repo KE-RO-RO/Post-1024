@@ -226,8 +226,9 @@
       pipSize: normalizePipSize(s.pipSize),
       uiZoom: normalizeZoom(s.uiZoom),
       theme: {
-        // 預設維持暗色＋細線版：既有使用者更新之後畫面不會突然大變
-        mode: th.mode === 'light' ? 'light' : 'dark',
+        // 預設亮色＋細線版。寫成「不是 dark 就當 light」，所以只有資料裡
+        // 明確存著 dark 的才是暗色；既有使用者存過的設定不會被覆蓋。
+        mode: th.mode === 'dark' ? 'dark' : 'light',
         cardStyle: th.cardStyle === 'full' ? 'full' : 'line',
         // 亮暗各存一份，只記使用者改過的項目；沒改的就是樣式表裡的預設
         custom: {
@@ -258,7 +259,7 @@
       version: SCHEMA_VERSION,
       updatedAt: nowIso(),
       appTitle: '便籤／常用語',
-      // 鎖定預設不啟用；彈出視窗說明只跳一次；主題預設暗色＋細線版
+      // 鎖定預設不啟用；彈出視窗說明只跳一次；主題預設亮色＋細線版
       settings: normalizeSettings(null),
       categories: [
         { id: catId, name: '常用語', shortLabel: '語', order: 0, color: null }
@@ -1637,7 +1638,8 @@
 
   function setTheme(patch) {
     var th = theme();
-    if (patch.mode) th.mode = patch.mode === 'light' ? 'light' : 'dark';
+    // 不認得的值一律回到預設（亮色），與載入時的正規化同一套規則
+    if (patch.mode) th.mode = patch.mode === 'dark' ? 'dark' : 'light';
     if (patch.cardStyle) th.cardStyle = patch.cardStyle === 'full' ? 'full' : 'line';
     touch();
   }
