@@ -2100,6 +2100,150 @@
     panel.hidden = false;
   }
 
+  /* ============================================================
+     雲端同步（Drive）
+
+     狀態點常駐在頂部列，帳號與動作收在點開的小面板裡——面板沒有會遺失
+     的東西，所以點外面、Esc、捲動都關得掉（對照 4.5）。
+     ============================================================ */
+
+  var SYNC_TEXT = {
+    out:     '尚未登入雲端同步',
+    ok:      '已同步',
+    syncing: '同步中…',
+    offline: '未同步（離線或連不上）',
+    error:   '同步失敗'
+  };
+
+  /* 絕對時間＋（相對時間）。衝突彈窗要拿兩個時間互相比較，只寫「3 分鐘前」
+     不夠用；而且 sinceText() 對未來的時間會回空字串——兩台機器的時鐘有落差
+     時真的會出現，那時候整行會變成「這台最後修改：」後面空白。 */
+  function stampText(iso) {
+    var t = Date.parse(iso);
+    if (!t) return '未知';
+    var d = new Date(t);
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    var abs = d.getFullYear() + '/' + p2(d.getMonth() + 1) + '/' + p2(d.getDate()) +
+              ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+    var ago = sinceText(iso);
+    return ago ? abs + '（' + ago + '）' : abs;
+  }
+
+  function updateSyncBtn(s) {
+    var dot = $('syncDot');
+    if (!dot) return;
+    dot.dataset.s = s.state;
+    var t = SYNC_TEXT[s.state] || '';
+    if (s.state === 'ok' && s.at) t += ' · ' + (sinceText(s.at) || '剛剛');
+    if (s.state === 'ok' && s.dirty) t = '有變更還沒上傳';
+    if (s.msg) t += '（' + s.msg + '）';
+    $('btnSync').title = t;
+    if (!$('syncPanel').hidden) openSyncPanel();   // 開著的話跟著更新
+  }
+
+  function openSyncPanel() {
+    var p = $('syncPanel');
+    var s = Drive.status();
+    p.innerHTML = '';
+
+    var line = document.createElement('div');
+    line.className = 'sy-line';
+    var dot = document.createElement('span');
+    dot.className = 'sync-dot';
+    dot.dataset.s = s.state;
+    dot.style.marginRight = '6px';
+    line.appendChild(dot);
+    var txt = document.createElement('span');
+    if (s.state === 'ok') {
+      txt.innerHTML = s.dirty ? '有變更還沒上傳'
+        : '已同步' + (s.at ? ' · <b>' + (sinceText(s.at) || '剛剛') + '</b>' : '');
+    } else {
+      txt.textContent = SYNC_TEXT[s.state] || '';
+    }
+    line.appendChild(txt);
+    p.appendChild(line);
+
+    if (s.msg) {
+      var m = document.createElement('div');
+      m.className = 'sy-mail';
+      m.style.color = 'var(--danger)';
+      m.textContent = s.msg;
+      p.appendChild(m);
+    }
+
+    var row = document.createElement('div');
+    row.className = 'sy-row';
+
+    if (s.state === 'out') {
+      var inBtn = document.createElement('button');
+      inBtn.className = 'main';
+      inBtn.textContent = '登入 Google';
+      inBtn.addEventListener('click', function () {
+        p.hidden = true;
+        Drive.signIn();
+      });
+      row.appendChild(inBtn);
+    } else {
+      var mail = document.createElement('div');
+      mail.className = 'sy-mail';
+      mail.textContent = s.email || '已登入';
+      p.appendChild(mail);        // row 這時還沒掛上去，不能拿它當參考節點
+
+      var nowBtn = document.createElement('button');
+      nowBtn.className = 'main';
+      nowBtn.textContent = '立刻同步';
+      nowBtn.addEventListener('click', function () { Drive.syncNow(); });
+      var outBtn = document.createElement('button');
+      outBtn.textContent = '登出';
+      outBtn.addEventListener('click', function () {
+        p.hidden = true;
+        Drive.signOut();
+      });
+      row.appendChild(nowBtn);
+      row.appendChild(outBtn);
+    }
+
+    p.appendChild(row);
+    p.hidden = false;
+  }
+
+  /**
+   * 兩邊都改過。永遠不自動合併，把選擇權交回去——但先給一顆「匯出這台的」，
+   * 選錯邊的代價才不是不可逆的。
+   */
+  function askConflict(info) {
+    $('syncPanel').hidden = true;
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<div style="line-height:1.7;color:var(--text-dim)">' +
+      '這台和雲端從上次同步之後<strong style="color:var(--text)">都改過</strong>，' +
+      '沒辦法自動合併，要選一邊覆蓋另一邊。<br><br>' +
+      '這台最後修改：<b style="color:var(--text)">' + stampText(info.localAt) + '</b><br>' +
+      '雲端最後修改：<b style="color:var(--text)">' + stampText(info.cloudAt) + '</b>' +
+      '</div>';
+
+    var save = document.createElement('button');
+    save.className = 'btn-plain';
+    save.style.cssText = 'margin-top:12px;padding:6px 12px;border:1px solid var(--border-strong);' +
+                         'border-radius:var(--radius-sm);background:var(--raise-xs);' +
+                         'color:var(--text);font-family:inherit;font-size:12px;cursor:pointer';
+    save.textContent = '先匯出這台的資料留底';
+    save.addEventListener('click', function () { handleMenu('export'); });
+    wrap.appendChild(save);
+
+    showModal({
+      title: '兩邊都改過',
+      body: wrap,
+      noEscape: true,      // 選錯就覆蓋掉一邊，不讓 Esc 順手關掉
+      buttons: [
+        { text: '先不要', onClick: closeModal },
+        { text: '用雲端的', onClick: function () { closeModal(); Drive.syncNow({ force: 'down' }); } },
+        { text: '用這台的', cls: 'btn-primary',
+          onClick: function () { closeModal(); Drive.syncNow({ force: 'up' }); } }
+      ]
+    });
+  }
+
   function render() {
     applyZoom();
     applyTheme();
@@ -2582,6 +2726,7 @@
       }
       if (!$('menuPanel').hidden) { $('menuPanel').hidden = true; return; }
       if (!$('zoomPanel').hidden) { $('zoomPanel').hidden = true; return; }
+      if (!$('syncPanel').hidden) { $('syncPanel').hidden = true; return; }
       if (colorPop) { closeColorPop(); return; }
       if (Theme.isOpen()) { Theme.close(); return; }
       if (t === $('searchBox')) { $('searchBox').value = ''; setSearch(''); render(); }
@@ -2970,6 +3115,10 @@
     });
     DB.onChange(render);
 
+    /* 雲端同步。登入一律由使用者按，開啟頁面不主動跳授權視窗——
+       只是想看一眼常用語的時候被 Google 的視窗擋住很煩。 */
+    Drive.init({ onStatus: updateSyncBtn, onConflict: askConflict });
+
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) clearDueTimer();
       else render();   // 回到前景先重算一次，不信任背景期間的計時器
@@ -3015,13 +3164,23 @@
     $('btnMenu').addEventListener('click', function (e) {
       e.stopPropagation();
       $('zoomPanel').hidden = true;
+      $('syncPanel').hidden = true;
       $('menuPanel').hidden = !$('menuPanel').hidden;
       if (!$('menuPanel').hidden) updateQuotaRow();
+    });
+
+    $('btnSync').addEventListener('click', function (e) {
+      e.stopPropagation();
+      $('menuPanel').hidden = true;
+      $('zoomPanel').hidden = true;
+      if ($('syncPanel').hidden) openSyncPanel();
+      else $('syncPanel').hidden = true;
     });
 
     $('btnZoom').addEventListener('click', function (e) {
       e.stopPropagation();
       $('menuPanel').hidden = true;
+      $('syncPanel').hidden = true;
       if ($('zoomPanel').hidden) openZoomPanel();
       else $('zoomPanel').hidden = true;
     });
@@ -3037,6 +3196,9 @@
       }
       if (!$('zoomPanel').hidden && !e.target.closest('#zoomPanel') && !e.target.closest('#btnZoom')) {
         $('zoomPanel').hidden = true;
+      }
+      if (!$('syncPanel').hidden && !e.target.closest('#syncPanel') && !e.target.closest('#btnSync')) {
+        $('syncPanel').hidden = true;
       }
       if (colorPop && !e.target.closest('.color-pop') && !e.target.closest('.color-dot')) {
         closeColorPop();
