@@ -1,5 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<!-- data-theme 先寫在這裡，讓預設的亮色在樣式表套用的當下就生效。
+     樣式表的 :root 是暗色、亮色是覆寫上去的，少了這一行，每次開啟會先
+     出現一格畫面的暗色再跳成亮色（JS 要等全部檔案載完才套主題）。
+     使用者存過的設定仍然以資料為準，app.js 的 applyTheme() 會覆寫這裡。 -->
+<html lang="zh-Hant" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
