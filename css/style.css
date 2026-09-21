@@ -1756,6 +1756,71 @@ body.drawer-open #app { margin-right: 356px; }
 .zoom-one:hover { border-color: var(--accent-line); color: var(--text); }
 .zoom-one b { color: var(--text); font-weight: 600; }
 
+/* ---------- 雲端同步 ---------- */
+
+/* 狀態點的顏色就是全部的狀態指示：綠＝已同步、琥珀＝未登入或同步中、
+   紅＝失敗。只有顏色不夠（色盲、小點），所以按鈕的 title 一律寫著完整說明。 */
+.sync-one { padding: 3px 9px; }
+.sync-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--text-faint);
+}
+.sync-dot[data-s="ok"]      { background: var(--ok); }
+.sync-dot[data-s="out"]     { background: var(--warn); }
+.sync-dot[data-s="syncing"] { background: var(--warn); }
+.sync-dot[data-s="offline"] { background: var(--warn); }
+.sync-dot[data-s="error"]   { background: var(--danger); }
+
+#syncPanel {
+  position: fixed;
+  top: 44px;
+  right: 108px;
+  z-index: 60;
+  width: 214px;
+  padding: 11px 12px;
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+#syncPanel .sy-line { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+#syncPanel .sy-line b { color: var(--text); font-weight: 700; }
+#syncPanel .sy-mail {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#syncPanel .sy-row { display: flex; gap: 6px; }
+/* 高度與寬度都不由文字決定：中英文字型的行高差 3px（11.41） */
+#syncPanel .sy-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 18px;
+  white-space: nowrap;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+#syncPanel .sy-row button.main {
+  flex: 1;
+  border-color: var(--border-strong);
+  background: var(--raise-xs);
+  color: var(--text);
+}
+#syncPanel .sy-row button:hover { border-color: var(--accent-line); color: var(--text); }
+
 #zoomPanel {
   position: fixed;
   top: 44px;
