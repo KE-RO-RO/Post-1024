@@ -482,6 +482,7 @@ body::before {
 
 /* 搜尋時看到的是過濾後的結果，拖曳算出來的順序是錯的，所以把手直接不出現 */
 #cardGrid.searching .drag-handle,
+#cardGrid.searching .link-grip,
 #cardGrid.searching .qp-grip { visibility: hidden; }
 
 .card {
@@ -646,15 +647,42 @@ textarea.inline-edit, input.inline-edit {
 .todo-row.done .editable { text-decoration: line-through; color: var(--text-faint); }
 
 /* ---------- 連結 ---------- */
-.link-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; }
+/* 固定欄位用 grid，不用 flex：這一列有七個東西（把手／勾選／名稱／標記／
+   複製／編輯／刪除），flex 排的話多一個元素就會把名稱擠歪（11.4）。
+   把手與標記欄沒東西時也留著空的元素佔格子（11.24）。 */
+.link-row {
+  display: grid;
+  grid-template-columns: 16px auto minmax(60px, 1fr) minmax(0, auto) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+}
 .link-row a {
   color: var(--accent);
   text-decoration: none;
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 平常隱藏，滑鼠移到這一列才浮現。跟卡片、常用語列、便籤同一套做法 */
+.link-grip {
+  color: var(--text-faint);
+  cursor: grab;
+  font-size: 12px;
+  line-height: 20px;
+  letter-spacing: -1px;
+  user-select: none;
+  opacity: 0;
+  text-align: center;
+}
+/* 只有一條網址時標記欄沒東西，但格子要留著（同把手，11.24） */
+.link-badge-gap { width: 0; }
+
+.link-row:hover .link-grip { opacity: 1; }
+.link-grip:hover { color: var(--accent); }
+.link-grip:active { cursor: grabbing; }
+.link-row.dragging { opacity: 0.35; }
 .link-row a:hover { text-decoration: underline; }
 
 /* 刪除鈕：平常不搶眼，滑過才轉紅，降低誤點機率 */
@@ -910,14 +938,19 @@ mark { background: var(--accent-mark); color: var(--text); border-radius: 2px; }
 
 .link-check { accent-color: var(--accent); flex: 0 0 auto; cursor: pointer; }
 
+/* 標記要讓得出空間：它是 grid 的 auto 欄位，不讓它縮的話窄卡片上會把
+   名稱那一欄壓成 0px（名稱直接看不見），按鈕還會被推出卡片外。
+   縮到不夠時自己出現刪節號，名稱永遠保得住 60px。 */
 .link-badge {
-  flex: 0 0 auto;
+  min-width: 0;
   font-size: 10.5px;
   color: var(--text-faint);
   background: var(--sink-soft);
   border-radius: 999px;
   padding: 2px 8px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .link-badge.warn { color: var(--danger-text); background: var(--danger-soft); }
 
@@ -1532,7 +1565,11 @@ body.drawer-open #app { margin-right: 356px; }
    常用語的標題列與資料列是 grid，display:none 會讓後面的欄位整排往前遞補一格，
    結果「複製鍵」跟「標籤」疊在一起。visibility 保留格子，只是看不見。 */
 #pipRoot .drag-handle,
+#pipRoot .link-grip,
 #pipRoot .qp-grip { visibility: hidden; }
+
+/* 置頂／不置頂的切換鈕，只存在小視窗自己的標題列上 */
+#pipRoot .pip-mode-btn { margin-left: auto; }
 
 /* 小視窗裡的密碼輸入。主視窗的彈窗在這裡看不到，只能自己做一份 */
 .pip-ask {
