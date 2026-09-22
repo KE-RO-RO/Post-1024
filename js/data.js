@@ -380,6 +380,24 @@
     touch();
   }
 
+  /** 連結項目的拖曳排序。跟便籤、常用語各自一套，因為清單不同。 */
+  function moveLink(tabId, fromId, toId) {
+    var tab = findTab(tabId);
+    if (!tab || tab.type !== 'link' || fromId === toId) return;
+
+    var list = (tab.links || []).slice().sort(function (a, b) { return a.order - b.order; });
+    var from = list.findIndex(function (x) { return x.id === fromId; });
+    var to = list.findIndex(function (x) { return x.id === toId; });
+    if (from < 0 || to < 0) return;
+
+    var moved = list.splice(from, 1)[0];
+    list.splice(to, 0, moved);
+    list.forEach(function (x, i) { x.order = i; });
+    tab.links = list;
+    tab.updatedAt = nowIso();
+    touch();
+  }
+
   /* ============================================================
      倒數提醒：每一筆各自有日期與（選填的）時間
      ------------------------------------------------------------
@@ -1956,6 +1974,7 @@
     TRASH_DAYS: TRASH_DAYS,
     TRASH_MAX: TRASH_MAX,
     moveNoteItem: moveNoteItem,
+    moveLink: moveLink,
     togglePin: togglePin,
     pinnedCount: pinnedCount,
     PIN_LIMIT: PIN_LIMIT,

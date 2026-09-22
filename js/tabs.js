@@ -266,8 +266,11 @@
       // 彈出置頂小視窗。這個瀏覽器不支援時不常駐一顆停用的按鈕，
       // 改成在 ⋯ 選單裡標示原因（見 cardMenuItems）
       if (ctx.pipSupported()) {
+        var pipMode = ctx.pipMode ? ctx.pipMode() : null;
         head.appendChild(svgIconBtn(PIP_SVG,
-          ctx.isPipped(tab) ? '這張卡片正顯示在置頂小視窗' : '彈出成置頂小視窗',
+          !ctx.isPipped(tab) ? '彈出成置頂小視窗'
+            : (pipMode === 'win' ? '這張卡片正顯示在不置頂小視窗，點一下改成置頂'
+                                 : '這張卡片正顯示在置頂小視窗'),
           function () { ctx.togglePip(tab); },
           ctx.isPipped(tab) ? 'pip-on' : ''));
       }
@@ -327,9 +330,20 @@
       items.push({
         text: '彈出成置頂小視窗',
         disabled: true,
-        hint: '這個瀏覽器不支援置頂小視窗（目前只有 Chrome、Edge 這類 Chromium 瀏覽器有）'
+        hint: '這個瀏覽器不支援置頂小視窗（目前只有 Chrome、Edge 這類 Chromium 瀏覽器有）。' +
+              '下面那個「不置頂」的版本任何瀏覽器都能開'
       });
     }
+
+    /* 不置頂的版本走一般彈出視窗。置頂是 Document PiP 規範強制的，
+       沒有開關可以關掉，所以「不置頂」只能是另一種視窗。
+       常駐的彈出鈕維持「置頂」不變，這裡是另一個入口（對照 11.1）。 */
+    items.push({
+      text: ctx.isPipped(tab) && ctx.pipMode && ctx.pipMode() === 'win'
+        ? '關掉不置頂視窗'
+        : '彈出成不置頂視窗',
+      onClick: function () { ctx.togglePipWindow(tab); }
+    });
 
     if (tab.type === 'note' && (tab.items || []).length > 1) {
       var anyOpen = tab.items.some(function (i) { return i.open !== false; });
@@ -963,6 +977,21 @@
       var row = document.createElement('div');
       row.className = 'link-row';
 
+      /* 把手的格子一律留著（唯讀時是個空的 span）。這一列是 grid，
+         少一個元素後面的欄位會整排遞補上來（11.24）。 */
+      var grip = document.createElement('span');
+      grip.className = 'link-grip';
+      if (!RO) {
+        grip.textContent = '⠿';
+        grip.title = '按住拖曳可調整順序';
+        grip.addEventListener('mousedown', function (e) {
+          e.stopPropagation();
+          row.draggable = true;
+        });
+        ctx.attachLinkDrag(row, tab, link);
+      }
+      row.appendChild(grip);
+
       var cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.className = 'link-check';
@@ -992,6 +1021,9 @@
       if (urls.length > 1) {
         var badge = document.createElement('span');
         badge.className = 'link-badge';
+        /* 標記只寫開啟的行為，不把複製也寫進來——那句話會長到把名稱那一欄
+           擠掉。複製固定第一條這件事寫在複製鈕的提示與複製成功的訊息裡，
+           剛好在使用者真的要用的那一刻才說。 */
         badge.textContent = urls.length + ' 條網址，隨機開 1 條';
         row.appendChild(badge);
       } else if (!urls.length) {
@@ -999,7 +1031,22 @@
         warn.className = 'link-badge warn';
         warn.textContent = '未設定網址';
         row.appendChild(warn);
+      } else {
+        // 標記欄沒東西時也要佔著格子，理由同把手（11.24）
+        row.appendChild(document.createElement('span')).className = 'link-badge-gap';
       }
+
+      /* 複製網址。小視窗裡照樣能用（標了 pip-ok）——複製是唯讀動作，
+         小視窗本來就允許看與複製。 */
+      row.appendChild(svgIconBtn(COPY_SVG,
+        urls.length > 1 ? '複製第 1 條網址' : '複製網址',
+        function (e) {
+          /* 開啟是隨機挑一條、複製固定第一條，兩個動作刻意不同。
+             多條時把「第 1 條」寫進複製成功的訊息裡，才不會以為
+             複製到的是剛剛開出來那一條。 */
+          var label = (link.name || '網址') + (urls.length > 1 ? '（第 1 條）' : '');
+          Clip.copy(urls[0] || '', e.currentTarget, label);
+        }, 'pip-ok'));
 
       row.appendChild(iconBtn('✎', '編輯', function () {
         ctx.editLink(tab, link);
@@ -1064,6 +1111,15 @@
     'stroke-linejoin="round">' +
     '<path d="M13.4 8a5.4 5.4 0 1 1-1.6-3.8"/>' +
     '<path d="M13.6 2.8v3.3h-3.3"/></svg>';
+
+  /* 複製：兩張疊起來的紙。自繪 SVG 的理由同上（11.5）——⧉ 這類字元在
+     不同字型下大小與垂直位置差很多，而它要跟 ✎ ✕ 並排。
+     使用者看過四款候選的實際截圖後選了這一款。 */
+  var COPY_SVG =
+    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+    'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<rect x="9" y="9" width="11" height="11" rx="1.8"/>' +
+    '<path d="M15 6.6V5.6A1.6 1.6 0 0 0 13.4 4H5.6A1.6 1.6 0 0 0 4 5.6v7.8A1.6 1.6 0 0 0 5.6 15h1"/></svg>';
 
   var LINK_SVG =
     '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +

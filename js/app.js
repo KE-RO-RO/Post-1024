@@ -1670,6 +1670,48 @@
     });
   }
 
+  /** 連結項目的拖曳。跟便籤同一套做法，只有排序函式不同。 */
+  function attachLinkDrag(el, tab, link) {
+    el.addEventListener('dragstart', function (e) {
+      dragRow = { tabId: tab.id, rowId: link.id };
+      el.classList.add('dragging');
+      try { e.dataTransfer.setData('text/plain', link.id); } catch (err) { /* 忽略 */ }
+      e.dataTransfer.effectAllowed = 'move';
+      e.stopPropagation();
+    });
+
+    el.addEventListener('dragend', function (e) {
+      dragRow = null;
+      el.draggable = false;
+      el.classList.remove('dragging');
+      clearRowDropMarks();
+      e.stopPropagation();
+    });
+
+    el.addEventListener('dragover', function (e) {
+      if (!dragRow || dragRow.rowId === link.id) return;
+      if (dragRow.tabId !== tab.id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('row-drop-target');
+    });
+
+    el.addEventListener('dragleave', function () {
+      el.classList.remove('row-drop-target');
+    });
+
+    el.addEventListener('drop', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.remove('row-drop-target');
+      if (dragRow && dragRow.tabId === tab.id && dragRow.rowId !== link.id) {
+        DB.moveLink(tab.id, dragRow.rowId, link.id);
+      }
+      dragRow = null;
+    });
+  }
+
   function clearRowDropMarks() {
     Array.prototype.forEach.call(
       document.querySelectorAll('.row-drop-target'),
@@ -1969,7 +2011,9 @@
       openCardMenu: openCardMenu,
       pipSupported: PiP.supported,
       isPipped: PiP.isOpen,
+      pipMode: PiP.mode,
       togglePip: PiP.toggle,
+      togglePipWindow: PiP.toggleWindowed,
       togglePin: function (tab) {
         var err = DB.togglePin(tab.id);
         if (err) Clip.toast(err, true);
@@ -1977,6 +2021,7 @@
       attachDrag: attachCardDrag,
       attachRowDrag: attachRowDrag,
       attachNoteDrag: attachNoteDrag,
+      attachLinkDrag: attachLinkDrag,
       editPhrase: editPhrase,
       editDueItem: editDueItem,
       editLink: editLink,

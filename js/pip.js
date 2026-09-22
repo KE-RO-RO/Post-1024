@@ -28,12 +28,26 @@
 
   var win = null;        // 小視窗的 window，沒開時是 null
   var curId = null;      // 目前顯示的卡片 id
+  var mode = 'pip';      // 'pip' = 置頂（Document PiP）、'win' = 不置頂（一般彈出視窗）
   var hotkeys = {};      // 小視窗自己的複製鍵對照表
   var ui = {};           // 由 app.js 注入的東西
   var sizeTimer = null;
 
+  /* 只有 Document PiP 有「浮在最上層」。這是規範強制的，
+     requestWindow() 只有 width、height、disallowReturnToOpener、
+     preferInitialWindowPlacement 四個選項，沒有開關可以關掉置頂。
+     所以「不置頂」走的是另一種視窗：一般的 window.open。 */
   function supported() {
     return !!window.documentPictureInPicture;
+  }
+
+  /** 不置頂視窗任何瀏覽器都開得出來，所以這一種永遠可用。 */
+  function windowedSupported() {
+    return true;
+  }
+
+  function currentMode() {
+    return win && !win.closed ? mode : null;
   }
 
   function isOpen(tab) {
@@ -193,6 +207,7 @@
     attachDrag: noop,
     attachRowDrag: noop,
     attachNoteDrag: noop,
+    attachLinkDrag: noop,
     editPhrase: noop,
     editDueItem: noop,
     editLink: noop,
@@ -204,10 +219,26 @@
     editPrivate: noop,
     pipSupported: supported,
     isPipped: isOpen,
-    togglePip: noop
+    pipMode: currentMode,
+    togglePip: noop,
+    togglePipWindow: noop
   };
 
   /* ---------- 開關與重繪 ---------- */
+
+  /* 圖釘自繪 SVG（同 11.5）。釘著＝置頂，劃掉＝不置頂。 */
+  var PIN_SVG =
+    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+    'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M9.2 3.4h5.6l-1 5.2 2.8 2.8v1.8H7.4v-1.8l2.8-2.8-1-5.2Z"/>' +
+    '<path d="M12 13.2V21"/></svg>';
+
+  var PIN_OFF_SVG =
+    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+    'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M9.2 3.4h5.6l-1 5.2 2.8 2.8v1.8H7.4v-1.8l2.8-2.8-1-5.2Z"/>' +
+    '<path d="M12 13.2V21"/>' +
+    '<path d="M3.6 3.6l16.8 16.8"/></svg>';
 
   function render() {
     if (!win || win.closed) return;
@@ -219,7 +250,27 @@
     if (!root) return;
     root.innerHTML = '';
     hotkeys = {};
-    root.appendChild(Tabs.renderCard(tab, pipCtx));
+    var card = Tabs.renderCard(tab, pipCtx);
+    root.appendChild(card);
+
+    /* 當場切換置頂／不置頂。做在小視窗自己的標題列上，而不是疊在
+       主視窗那顆彈出鈕上——那顆按下去是「彈出」，再承載一種語意就是 11.1。
+       填進去的值只在記憶體，換視窗不會掉。 */
+    var head = card.querySelector('.card-head');
+    if (head) {
+      var b = document.createElement('button');
+      b.className = 'icon-btn pip-ok pip-mode-btn';
+      b.innerHTML = mode === 'pip' ? PIN_SVG : PIN_OFF_SVG;
+      b.title = mode === 'pip'
+        ? '目前置頂，點一下改成不置頂（會被其他視窗蓋住）'
+        : '目前不置頂，點一下改成浮在最上層';
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        switchMode();
+      });
+      head.appendChild(b);
+    }
+
     win.document.title = tab.title || '未命名';
   }
 
@@ -258,12 +309,108 @@
     }, 400);
   }
 
-  function open(tab) {
-    if (!supported()) return;
+  /* 兩種視窗共用的準備工作：建骨架、掛事件。
+     一般彈出視窗可能是重複用同一個視窗（window.open 的名字一樣），
+     所以這裡要能重複呼叫而不出事。 */
+  function prepareDoc(w) {
+    // about:blank 通常已經有 body；沒有的話自己寫一份骨架
+    if (!w.document.body) {
+      w.document.write('<!doctype html><html><head><meta charset="utf-8">' +
+                       '</head><body></body></html>');
+      w.document.close();
+    }
 
-    // 已經開著就直接換內容。瀏覽器同時只准存在一個 PiP 視窗，
-    // 重新 requestWindow 會把舊的關掉再開一個，畫面會閃
-    if (win && !win.closed) {
+    if (!w.document.getElementById('pipRoot')) {
+      var root = w.document.createElement('div');
+      root.id = 'pipRoot';
+      w.document.body.appendChild(root);
+    }
+
+    // 這份文件要有自己的提示層，不然複製成功的訊息會跑到看不見的主視窗
+    if (!w.document.getElementById('toast')) {
+      var toastEl = w.document.createElement('div');
+      toastEl.id = 'toast';
+      toastEl.hidden = true;
+      w.document.body.appendChild(toastEl);
+    }
+
+    if (!w.__snWired) {
+      w.__snWired = true;
+      w.addEventListener('pagehide', onWinGone);
+      w.addEventListener('resize', rememberSize);
+      w.addEventListener('blur', onBlur);
+      w.document.addEventListener('keydown', onKeyDown);
+    }
+  }
+
+  function onWinGone() {
+    win = null;
+    curId = null;
+    hotkeys = {};
+    if (ui.onChange) ui.onChange();
+  }
+
+  /**
+   * 置頂：Document PiP。
+   * @param {Function} onFail 開不起來時的退路。從不置頂視窗裡按圖釘切過來時
+   *        會用到——那個點擊發生在子視窗上，瀏覽器可能不認為主視窗有使用者
+   *        動作，requestWindow 就會被拒。這時候要把原本那個視窗開回來，
+   *        不然使用者會落到「兩個都沒有」的狀態。
+   */
+  function openPip(tab, onFail) {
+    if (!supported()) { if (onFail) onFail(); return; }
+    var size = DB.pipSize();
+    window.documentPictureInPicture.requestWindow({
+      width: size.w,
+      height: size.h
+    }).then(function (w) {
+      win = w;
+      mode = 'pip';
+      curId = tab.id;
+      prepareDoc(w);
+      render();
+      if (ui.onChange) ui.onChange();
+    }, function (e) {
+      if (onFail) { onFail(e); return; }
+      Clip.toast('沒辦法開啟小視窗：' + (e && e.message ? e.message : '未知原因'), true);
+    });
+  }
+
+  /**
+   * 不置頂：一般的彈出視窗。
+   * 會被彈出視窗攔截擋掉（跟連結卡一次開多個分頁是同一件事），
+   * 擋掉時 window.open 回傳 null——這裡沒有用 noopener，回傳值才判斷得準（11.7）。
+   */
+  function openWindowed(tab) {
+    var size = DB.pipSize();
+    var w = null;
+    try {
+      w = window.open('', 'stickyNotesMini',
+        'popup=yes,width=' + size.w + ',height=' + size.h);
+    } catch (e) { w = null; }
+
+    if (!w) {
+      Clip.toast('不置頂視窗被瀏覽器擋下了，允許彈出式視窗之後再試一次', true);
+      return;
+    }
+    try { w.opener = null; } catch (e) { /* 跨來源時會被拒，忽略 */ }
+
+    win = w;
+    mode = 'win';
+    curId = tab.id;
+    prepareDoc(w);
+    render();
+    w.focus();
+    if (ui.onChange) ui.onChange();
+  }
+
+  function open(tab, wantMode) {
+    var want = wantMode === 'win' ? 'win' : 'pip';
+    if (want === 'pip' && !supported()) return;
+
+    // 已經開著而且是同一種視窗：直接換內容。
+    // PiP 同時只准存在一個，重新 requestWindow 會關掉舊的再開，畫面會閃
+    if (win && !win.closed && mode === want) {
       curId = tab.id;
       render();
       win.focus();
@@ -271,52 +418,59 @@
       return;
     }
 
-    var size = DB.pipSize();
-    window.documentPictureInPicture.requestWindow({
-      width: size.w,
-      height: size.h
-    }).then(function (w) {
-      win = w;
-      curId = tab.id;
+    // 換另一種視窗：先收掉舊的（同時只留一個小視窗，不論哪一種）
+    if (win && !win.closed) close();
 
-      var root = w.document.createElement('div');
-      root.id = 'pipRoot';
-      w.document.body.appendChild(root);
-
-      // 這份文件要有自己的提示層，不然複製成功的訊息會跑到看不見的主視窗
-      var toastEl = w.document.createElement('div');
-      toastEl.id = 'toast';
-      toastEl.hidden = true;
-      w.document.body.appendChild(toastEl);
-
-      w.addEventListener('pagehide', function () {
-        win = null;
-        curId = null;
-        hotkeys = {};
-        if (ui.onChange) ui.onChange();
-      });
-      w.addEventListener('resize', rememberSize);
-      w.addEventListener('blur', onBlur);
-      w.document.addEventListener('keydown', onKeyDown);
-
-      render();
-      if (ui.onChange) ui.onChange();
-    }, function (e) {
-      Clip.toast('沒辦法開啟小視窗：' + (e && e.message ? e.message : '未知原因'), true);
-    });
+    if (want === 'win') openWindowed(tab);
+    else openPip(tab);
   }
 
   function close() {
-    if (win && !win.closed) win.close();
+    if (win && !win.closed) {
+      try { win.removeEventListener('pagehide', onWinGone); } catch (e) { /* 忽略 */ }
+      win.close();
+    }
     win = null;
     curId = null;
     hotkeys = {};
   }
 
   function toggle(tab) {
-    if (isOpen(tab)) { close(); if (ui.onChange) ui.onChange(); return; }
-    open(tab);
+    if (isOpen(tab) && mode === 'pip') { close(); if (ui.onChange) ui.onChange(); return; }
+    open(tab, 'pip');
   }
+
+  function toggleWindowed(tab) {
+    if (isOpen(tab) && mode === 'win') { close(); if (ui.onChange) ui.onChange(); return; }
+    open(tab, 'win');
+  }
+
+  /** 小視窗裡的圖釘：當場換另一種視窗，顯示的卡片不變。 */
+  function switchMode() {
+    var tab = DB.findTab(curId);
+    if (!tab) return;
+
+    if (mode === 'pip') { open(tab, 'win'); return; }
+
+    if (!supported()) {
+      Clip.toast('這個瀏覽器不支援置頂小視窗', true);
+      return;
+    }
+    // 切成置頂：失敗就把不置頂那個視窗開回來，不要讓兩個都沒有
+    if (win && !win.closed) close();
+    openPip(tab, function () {
+      Clip.toast('這個瀏覽器不讓小視窗自己切成置頂，請用卡片上的彈出鈕', true);
+      openWindowed(tab);
+    });
+  }
+
+  /* 一般彈出視窗不會跟著開啟它的分頁一起消失（PiP 會）。
+     主視窗關掉或重新整理時把它收掉，不然它會變成一個沒有人在更新的死畫面。 */
+  window.addEventListener('pagehide', function () {
+    if (win && !win.closed && mode === 'win') {
+      try { win.close(); } catch (e) { /* 忽略 */ }
+    }
+  });
 
   /* 刻意不自己訂閱 DB.onChange：主視窗的 render() 會在套好主題與自訂配色
      之後呼叫 PiP.render()。自己訂閱的話會排在主視窗前面跑，抄到的是還沒更新
@@ -324,10 +478,14 @@
 
   window.PiP = {
     supported: supported,
+    windowedSupported: windowedSupported,
+    mode: currentMode,
     isOpen: isOpen,
     open: open,
     close: close,
     toggle: toggle,
+    toggleWindowed: toggleWindowed,
+    switchMode: switchMode,
     render: render,
     setUI: setUI
   };
