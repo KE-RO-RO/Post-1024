@@ -558,7 +558,7 @@
     var copy = document.createElement('button');
     copy.className = 'nf-btn nf-main pip-ok';
     copy.textContent = '複製';
-    copy.title = '整張複製：標題行＋所有欄位，空的也會印出來';
+    copy.title = '複製所有欄位（不含標題），空的也會印出來';
     copy.addEventListener('click', function (e) {
       e.stopPropagation();
       Clip.copy(DB.noteFormText(item, function (f) { return noteVal(item, f); }),
@@ -569,12 +569,17 @@
     var clear = document.createElement('button');
     clear.className = 'nf-btn pip-ok';
     clear.textContent = '一鍵清空';
-    clear.title = '只清填進去的值，欄位名不動；有預設值的回到預設值';
+    clear.title = '清掉所有欄位的值（全部變空白），欄位名不動';
     clear.addEventListener('click', function (e) {
       e.stopPropagation();
-      delete noteVals[item.id];
+      /* v4.25：一律清成空白，預設值只在「還沒填過」時帶出來。
+         以前是「回到預設值」——使用者把填好的單子整張貼進管理欄位時，
+         冒號後面全部變成預設值，按清空看起來就是沒反應。 */
+      var blank = {};
+      fields.forEach(function (f) { blank[f.id] = ''; });
+      noteVals[item.id] = blank;
       // 直接改輸入框就好，不重畫（11.20）
-      fields.forEach(function (f, n) { if (inputs[n]) inputs[n].value = f.def || ''; });
+      inputs.forEach(function (inp) { inp.value = ''; });
       if (inputs[0]) inputs[0].focus();
     });
     acts.appendChild(clear);
@@ -593,7 +598,7 @@
 
     var tip = document.createElement('span');
     tip.className = 'nf-hint';
-    tip.textContent = '複製會含標題與空欄位';
+    tip.textContent = '複製不含標題，空欄位也會印';
     acts.appendChild(tip);
 
     fb.appendChild(acts);

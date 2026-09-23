@@ -521,14 +521,14 @@
   }
 
   /**
-   * 複製出來的字：標題行（留空就沒有這一行）＋每一欄「欄位名：值」，
+   * 複製出來的字：每一欄「欄位名：值」（v4.25 起不含標題行），
    * **空的欄位也印**，整張的形狀完整保留。
    * @param {object} item   便籤的一筆（kind === 'form'）
    * @param {function} valueOf 欄位 → 目前的值
    */
   function noteFormText(item, valueOf) {
+    // v4.25：標題不複製（使用者要的），只複製欄位
     var lines = [];
-    if (item.title && item.title.trim()) lines.push(item.title.trim());
     (item.fields || []).forEach(function (f) {
       var v = valueOf ? valueOf(f) : f.def;
       lines.push(f.label + '：' + (v == null ? '' : String(v)));

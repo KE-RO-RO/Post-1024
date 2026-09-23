@@ -347,7 +347,11 @@
     }
   }
 
+  // 這個置頂視窗是不是從不置頂視窗借來開的（見 switchMode）
+  var borrowed = false;
+
   function onWinGone() {
+    borrowed = false;
     win = null;
     curId = null;
     hotkeys = {};
@@ -371,6 +375,7 @@
       win = w;
       mode = 'pip';
       curId = tab.id;
+      borrowed = false;
       prepareDoc(w);
       render();
       if (ui.onChange) ui.onChange();
@@ -385,16 +390,24 @@
    * 會被彈出視窗攔截擋掉（跟連結卡一次開多個分頁是同一件事），
    * 擋掉時 window.open 回傳 null——這裡沒有用 noopener，回傳值才判斷得準（11.7）。
    */
-  function openWindowed(tab) {
+  function openWindowed(tab, from) {
     var size = DB.pipSize();
+    var feat = 'popup=yes,width=' + size.w + ',height=' + size.h;
     var w = null;
-    try {
-      w = window.open('', 'stickyNotesMini',
-        'popup=yes,width=' + size.w + ',height=' + size.h);
-    } catch (e) { w = null; }
+    /* from：從置頂視窗按圖釘切過來時，點擊發生在置頂視窗上，
+       使用者動作是它的，所以先用它的 window.open 開（同 switchMode 的道理，11.52）；
+       開不起來再退回主視窗。 */
+    if (from) {
+      try { w = from.open('', 'stickyNotesMini', feat); } catch (e) { w = null; }
+    }
+    if (!w) {
+      try { w = window.open('', 'stickyNotesMini', feat); } catch (e) { w = null; }
+    }
 
     if (!w) {
-      Clip.toast('不置頂視窗被瀏覽器擋下了，允許彈出式視窗之後再試一次', true);
+      // 從置頂視窗切過來時，提示要出現在置頂視窗上，主視窗多半被蓋住（11.26）
+      Clip.toast('不置頂視窗被瀏覽器擋下了，允許彈出式視窗之後再試一次', true,
+        from && !from.closed ? from.document : undefined);
       return;
     }
     try { w.opener = null; } catch (e) { /* 跨來源時會被拒，忽略 */ }
@@ -402,6 +415,7 @@
     win = w;
     mode = 'win';
     curId = tab.id;
+    borrowed = false;
     prepareDoc(w);
     render();
     w.focus();
@@ -454,24 +468,75 @@
     var tab = DB.findTab(curId);
     if (!tab) return;
 
-    if (mode === 'pip') { open(tab, 'win'); return; }
+    if (mode === 'pip') {
+      var pipWin = (win && !win.closed) ? win : null;
+      // 先開新的再關舊的：開不起來時置頂視窗還在，不會兩個都沒有
+      var prevWin = win, prevBorrowed = borrowed;
+      openWindowed(tab, pipWin);
+      if (win !== prevWin && pipWin) {
+        try { pipWin.removeEventListener('pagehide', onWinGone); } catch (e) { /* 忽略 */ }
+        try { pipWin.close(); } catch (e) { /* 忽略 */ }
+      } else {
+        borrowed = prevBorrowed;
+      }
+      return;
+    }
 
     if (!supported()) {
       Clip.toast('這個瀏覽器不支援置頂小視窗', true);
       return;
     }
-    // 切成置頂：失敗就把不置頂那個視窗開回來，不要讓兩個都沒有
-    if (win && !win.closed) close();
-    openPip(tab, function () {
-      Clip.toast('這個瀏覽器不讓小視窗自己切成置頂，請用卡片上的彈出鈕', true);
-      openWindowed(tab);
+    /* 切成置頂（v4.25 修正）。
+       以前是先關掉不置頂視窗、再用主視窗的 requestWindow 開置頂——但那個
+       點擊發生在不置頂視窗上，主視窗沒有使用者動作，實機上一律被拒（11.52），
+       結果只是把不置頂視窗關掉又開回來，看起來就是「點了沒反應」。
+       改成用**不置頂視窗自己的** documentPictureInPicture 開：點擊就發生在
+       那份文件上，使用者動作是它的。開成功才把不置頂視窗關掉；
+       失敗就留著原本的視窗，在它自己身上講原因（11.26：提示要出現在看得到的那份文件）。 */
+    var old = (win && !win.closed && mode === 'win') ? win : null;
+    var api = null;
+    try { api = old && old.documentPictureInPicture; } catch (e) { api = null; }
+    if (!api) {
+      // 沒有不置頂視窗可借（理論上不會發生）：走原本的路
+      if (win && !win.closed) close();
+      openPip(tab, function () {
+        Clip.toast('這個瀏覽器不讓小視窗自己切成置頂，請用卡片上的彈出鈕', true);
+        openWindowed(tab);
+      });
+      return;
+    }
+
+    var size = DB.pipSize();
+    api.requestWindow({ width: size.w, height: size.h }).then(function (w) {
+      try { old.removeEventListener('pagehide', onWinGone); } catch (e) { /* 忽略 */ }
+      win = w;
+      mode = 'pip';
+      curId = tab.id;
+      borrowed = true;
+      prepareDoc(w);
+      render();
+      try { old.close(); } catch (e) { /* 忽略 */ }
+      if (ui.onChange) ui.onChange();
+      /* 保險：萬一瀏覽器把「借來開的置頂視窗」跟著不置頂視窗一起收掉，
+         不能讓使用者落到兩個都沒有。沙盒的 Chromium 不會收，實機要驗。 */
+      setTimeout(function () {
+        if (win === w && w.closed) {
+          onWinGone();
+          Clip.toast('置頂視窗被瀏覽器關掉了，請用卡片上的彈出鈕重開', true);
+        }
+      }, 1200);
+    }, function (e) {
+      Clip.toast('沒辦法切成置頂：' + (e && e.message ? e.message : '瀏覽器拒絕') +
+        '。可以改用主視窗卡片上的彈出鈕', true, old.document);
     });
   }
 
   /* 一般彈出視窗不會跟著開啟它的分頁一起消失（PiP 會）。
      主視窗關掉或重新整理時把它收掉，不然它會變成一個沒有人在更新的死畫面。 */
+  /* 從不置頂視窗借開的置頂視窗（borrowed）不是主視窗開的，
+     主視窗關掉時瀏覽器不會替它收，一樣要自己關。 */
   window.addEventListener('pagehide', function () {
-    if (win && !win.closed && mode === 'win') {
+    if (win && !win.closed && (mode === 'win' || borrowed)) {
       try { win.close(); } catch (e) { /* 忽略 */ }
     }
   });
@@ -491,6 +556,8 @@
     toggleWindowed: toggleWindowed,
     switchMode: switchMode,
     render: render,
-    setUI: setUI
+    setUI: setUI,
+    // 測試用：目前的小視窗（借開的置頂視窗主視窗的 documentPictureInPicture.window 看不到）
+    _window: function () { return (win && !win.closed) ? win : null; }
   };
 })();
