@@ -1834,6 +1834,16 @@ body.drawer-open #app { margin-right: 356px; }
   white-space: nowrap;
 }
 #syncPanel .sy-row { display: flex; gap: 6px; }
+
+/* 未登入時那一行「連不上的話可以匯入」是說明，不是信箱：信箱用刪節號
+   截斷是對的（很長又不需要全看），說明截掉就等於沒寫（只有截圖看得出來）。 */
+#syncPanel .sy-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  margin-bottom: 9px;
+  white-space: normal;
+}
 /* 高度與寬度都不由文字決定：中英文字型的行高差 3px（11.41） */
 #syncPanel .sy-row button {
   display: inline-flex;
