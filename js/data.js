@@ -93,13 +93,17 @@
       .map(function (u) { return String(u || '').trim(); })
       .filter(function (u, i, arr) { return u && arr.indexOf(u) === i; });
 
-    return {
+    var out = {
       id: l.id || l.Id || uid(),
       name: l.name || l.Name || '',
       urls: urls,
       order: typeof l.order === 'number' ? l.order
            : typeof l.Order === 'number' ? l.Order : j
     };
+    /* 勾選狀態（v4.24 起記住）：只記「沒勾」的，預設就是勾選。
+       舊資料與新加的連結都沒有這個欄位，所以畫面跟以前一樣是全勾。 */
+    if (l.off === true) out.off = true;
+    return out;
   }
 
   /**
@@ -267,6 +271,45 @@
     };
   }
 
+  /* 「＋ 新增卡片」那個彈窗裡的類型順序（v4.23）。
+     程式認得的類型與出廠順序寫在這裡；使用者拖出來的順序存在
+     settings.typeOrder，跟著匯出匯入與雲端同步走。
+
+     這個陣列決定畫面上出現哪幾格，所以驗證要嚴（3.2 的通則）：
+     不認得的名字丟掉、重複的丟掉；程式認得但清單裡沒有的補在最後面——
+     之後新增卡片類型時，舊的資料檔不會讓它消失。
+     沒排過就是 null，畫面用出廠順序。 */
+  var CARD_TYPES = ['quickphrase', 'note', 'todo', 'countdown', 'link',
+                    'private', 'codegen', 'form', 'table'];
+
+  function normalizeTypeOrder(v) {
+    if (!Array.isArray(v)) return null;
+    var out = [];
+    v.forEach(function (t) {
+      if (typeof t === 'string' && CARD_TYPES.indexOf(t) >= 0 && out.indexOf(t) < 0) out.push(t);
+    });
+    if (!out.length) return null;
+    CARD_TYPES.forEach(function (t) { if (out.indexOf(t) < 0) out.push(t); });
+    return out;
+  }
+
+  function typeOrder() {
+    return normalizeTypeOrder(data.settings && data.settings.typeOrder) || CARD_TYPES.slice();
+  }
+
+  /** 把 from 這個類型移到 to 的位置（同便籤、連結的拖曳排序：插在目標前面或後面由方向決定） */
+  function moveType(from, to) {
+    if (from === to) return false;
+    var list = typeOrder();
+    var a = list.indexOf(from), b = list.indexOf(to);
+    if (a < 0 || b < 0) return false;
+    list.splice(a, 1);
+    list.splice(b, 0, from);
+    data.settings.typeOrder = list;
+    touch();
+    return true;
+  }
+
   function normalizeSettings(s) {
     s = s || {};
     var th = s.theme || {};
@@ -276,6 +319,7 @@
       popupHintShown: !!s.popupHintShown,
       pipSize: normalizePipSize(s.pipSize),
       uiZoom: normalizeZoom(s.uiZoom),
+      typeOrder: normalizeTypeOrder(s.typeOrder),
       theme: {
         // 預設亮色＋細線版。寫成「不是 dark 就當 light」，所以只有資料裡
         // 明確存著 dark 的才是暗色；既有使用者存過的設定不會被覆蓋。
@@ -398,25 +442,112 @@
     if (Array.isArray(list)) {
       return list.map(function (x, j) {
         x = x || {};
-        return {
+        var out = {
           id: x.id || uid(),
+          // 沒有 kind 的舊資料一律是自由格式，畫面完全不變
+          kind: x.kind === 'form' ? 'form' : 'free',
           content: typeof x.content === 'string' ? x.content : '',
           open: x.open !== false,
           order: typeof x.order === 'number' ? x.order : j
         };
+        if (out.kind === 'form') {
+          out.title = typeof x.title === 'string' ? x.title : '';
+          out.fields = normalizeNoteFields(x.fields);
+        }
+        return out;
       });
     }
     // 舊卡片：整段內容轉成第一筆，一個字都不掉
     if (legacyContent) {
-      return [{ id: uid(), content: legacyContent, open: true, order: 0 }];
+      return [{ id: uid(), kind: 'free', content: legacyContent, open: true, order: 0 }];
     }
     return [];
   }
 
+  /* ============================================================
+     便籤的「欄位」型別（v4.23）
+     ------------------------------------------------------------
+     一筆 = 標題行（可留空）＋一排「欄位名：值」。
+     存進資料檔的只有欄位名與預設值（使用者的設定），
+     **填進去的值不存**，只放在 tabs.js 的記憶體裡（同編碼卡、表單卡）。
+
+     欄位名一律是使用者的資料，程式碼裡不寫任何一個實際的欄位名（4.4）。
+     ============================================================ */
+
+  function normalizeNoteFields(arr) {
+    if (!Array.isArray(arr)) return [];
+    var seen = {};
+    var out = [];
+    arr.forEach(function (f) {
+      if (!f || typeof f.label !== 'string') return;
+      var label = f.label.trim();
+      if (!label) return;
+      var id = typeof f.id === 'string' && f.id && !seen[f.id] ? f.id : uid();
+      seen[id] = true;
+      out.push({ id: id, label: label, def: typeof f.def === 'string' ? f.def : '' });
+    });
+    return out;
+  }
+
+  /** 欄位名與預設值之間的分隔：全形或半形冒號，取第一個 */
+  var NOTE_FIELD_SEP = /[：:]/;
+
+  /**
+   * 把設定框裡的字（一行一欄，「欄位名：預設值」）轉成欄位陣列。
+   * 空白行忽略。欄位名相同的沿用舊的 id，已經填進去的值才不會因為
+   * 改了別一行就整個清掉。
+   */
+  function noteFieldsParse(text, oldFields) {
+    var pool = (oldFields || []).slice();
+    var out = [];
+    String(text || '').split(/\r?\n/).forEach(function (line) {
+      if (!line.trim()) return;
+      var m = NOTE_FIELD_SEP.exec(line);
+      var label = (m ? line.slice(0, m.index) : line).trim();
+      var def = m ? line.slice(m.index + 1).trim() : '';
+      if (!label) return;
+      var k = pool.findIndex(function (f) { return f.label === label; });
+      var id = k >= 0 ? pool.splice(k, 1)[0].id : uid();
+      out.push({ id: id, label: label, def: def });
+    });
+    return out;
+  }
+
+  /** noteFieldsParse 的反方向：填回設定框用 */
+  function noteFieldsText(fields) {
+    return (fields || []).map(function (f) {
+      return f.def ? f.label + '：' + f.def : f.label;
+    }).join('\n');
+  }
+
+  /**
+   * 複製出來的字：標題行（留空就沒有這一行）＋每一欄「欄位名：值」，
+   * **空的欄位也印**，整張的形狀完整保留。
+   * @param {object} item   便籤的一筆（kind === 'form'）
+   * @param {function} valueOf 欄位 → 目前的值
+   */
+  function noteFormText(item, valueOf) {
+    var lines = [];
+    if (item.title && item.title.trim()) lines.push(item.title.trim());
+    (item.fields || []).forEach(function (f) {
+      var v = valueOf ? valueOf(f) : f.def;
+      lines.push(f.label + '：' + (v == null ? '' : String(v)));
+    });
+    return lines.join('\n');
+  }
+
   /** 便籤項目的拖曳排序。跟常用語的 moveRow 分開，兩者的清單不同。 */
-  function moveNoteItem(tabId, fromId, toId) {
+  function moveNoteItem(tabId, fromId, toId) { moveItem(tabId, fromId, toId); }
+
+  /**
+   * `tab.items` 的拖曳排序：便籤、待辦、倒數共用（v4.24）。
+   * 把 from 搬到 to 的位置，整份重排 order。
+   * 倒數的畫面仍然先依日期分組、同一天依時間排，order 只決定「同一組、
+   * 同一個時間」之間的先後，所以畫面那一層只准在同一組內拖。
+   */
+  function moveItem(tabId, fromId, toId) {
     var tab = findTab(tabId);
-    if (!tab || tab.type !== 'note' || fromId === toId) return;
+    if (!tab || ['note', 'todo', 'countdown'].indexOf(tab.type) < 0 || fromId === toId) return;
 
     var list = (tab.items || []).slice().sort(function (a, b) { return a.order - b.order; });
     var from = list.findIndex(function (x) { return x.id === fromId; });
@@ -607,10 +738,18 @@
    * 標記資料已變更：更新時間戳、通知畫面重繪、延遲寫入分頁暫存。
    * 延遲 1 秒是為了避免打字時每按一個鍵就寫一次硬碟。
    */
+  /* 「資料變了」的通知，不管要不要重畫都會發。雲端同步掛在這裡。
+     以前同步只掛在 onChange 上，而 touch(true)（就地編輯文字、改標題、
+     記住高度這些不重畫的變更）不會發 onChange——那些修改就一直沒排上傳，
+     關掉分頁時也不算「有沒上傳的變更」（v4.24 修正）。 */
+  var dirtyListeners = [];
+  function onDirty(fn) { dirtyListeners.push(fn); }
+
   function touch(skipRender) {
     data.updatedAt = nowIso();
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(saveNow, 1000);
+    for (var i = 0; i < dirtyListeners.length; i++) dirtyListeners[i]();
     if (!skipRender) notify();
   }
 
@@ -2078,6 +2217,14 @@
     TRASH_DAYS: TRASH_DAYS,
     TRASH_MAX: TRASH_MAX,
     moveNoteItem: moveNoteItem,
+    moveItem: moveItem,
+    onDirty: onDirty,
+    noteFieldsParse: noteFieldsParse,
+    noteFieldsText: noteFieldsText,
+    noteFormText: noteFormText,
+    CARD_TYPES: CARD_TYPES,
+    typeOrder: typeOrder,
+    moveType: moveType,
     moveLink: moveLink,
     wipeLocal: wipeLocal,
     memoryOnly: memoryOnly,

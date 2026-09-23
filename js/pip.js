@@ -207,6 +207,10 @@
     attachDrag: noop,
     attachRowDrag: noop,
     attachNoteDrag: noop,
+    attachItemDrag: noop,
+    movePrivate: noop,
+    // 便籤的新增與「管理欄位」都在主視窗做；小視窗只能填值與複製
+    editNoteItem: noop,
     attachLinkDrag: noop,
     editPhrase: noop,
     editDueItem: noop,

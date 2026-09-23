@@ -862,6 +862,127 @@
   // 搜尋去抖：停手這麼久之後才真的搜。太短沒效果，太長會像沒反應
   var SEARCH_DELAY = 150;
 
+  /* ============================================================
+     便籤：新增一筆（先選型別）／欄位型別的「管理欄位」（v4.23）
+     ------------------------------------------------------------
+     新增時彈窗最上面選型別，比照私人卡片（9.9）。自由格式照舊是一段文字；
+     欄位型別是標題行＋一個框、一行一欄（使用者看過三案截圖後選的 A 案）。
+     item 給了就是編輯既有的欄位型別，不再出現型別切換——
+     改型別等於換一種東西，重新建一筆比較不會弄丟內容。
+     ============================================================ */
+  function editNoteItem(tab, item) {
+    var isNew = !item;
+    var kind = isNew ? 'free' : 'form';
+    var wrap = document.createElement('div');
+
+    var seg = null;
+    if (isNew) {
+      var kl = document.createElement('label');
+      kl.textContent = '型別';
+      wrap.appendChild(kl);
+      seg = document.createElement('div');
+      seg.className = 'kind-seg';
+      wrap.appendChild(seg);
+    }
+
+    var freeBox = document.createElement('div');
+    var formBox = document.createElement('div');
+    wrap.appendChild(freeBox);
+    wrap.appendChild(formBox);
+
+    var cl = document.createElement('label');
+    cl.textContent = '內容（可留空）';
+    var content = document.createElement('textarea');
+    content.rows = 5;
+    freeBox.appendChild(cl);
+    freeBox.appendChild(content);
+
+    var title = labeledInput(formBox, '標題行（可留空）', 'text',
+      item ? item.title : '', '留空的話，卡片上與複製出來都不會有這一行');
+
+    var fl = document.createElement('label');
+    fl.textContent = '欄位（一行一個）';
+    var fields = document.createElement('textarea');
+    fields.rows = 8;
+    fields.value = item ? DB.noteFieldsText(item.fields) : '';
+    fields.placeholder = '欄位名\n欄位名：預設值';
+    formBox.appendChild(fl);
+    formBox.appendChild(fields);
+
+    var hint = document.createElement('div');
+    hint.className = 'field-hint';
+    hint.textContent = '想帶預設值就寫「欄位名：預設值」。空白行會自動忽略，' +
+      '順序就是卡片上的順序。';
+    formBox.appendChild(hint);
+
+    function applyKind() {
+      freeBox.hidden = kind !== 'free';
+      formBox.hidden = kind !== 'form';
+      if (seg) {
+        Array.prototype.forEach.call(seg.children, function (b) {
+          b.classList.toggle('on', b.dataset.kind === kind);
+        });
+      }
+    }
+
+    if (seg) {
+      [['free', '自由格式'], ['form', '欄位']].forEach(function (k) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.kind = k[0];
+        b.textContent = k[1];
+        b.addEventListener('click', function () {
+          kind = k[0];
+          applyKind();
+          (kind === 'form' ? title : content).focus();
+        });
+        seg.appendChild(b);
+      });
+    }
+    applyKind();
+
+    function save() {
+      if (kind === 'form') {
+        var next = DB.noteFieldsParse(fields.value, item ? item.fields : null);
+        if (isNew) {
+          tab.items.push({ id: DB.uid(), kind: 'form', content: '', open: true,
+            order: tab.items.length, title: title.value.trim(), fields: next });
+        } else {
+          item.title = title.value.trim();
+          item.fields = next;
+        }
+      } else {
+        tab.items.push({ id: DB.uid(), kind: 'free', content: content.value,
+          open: true, order: tab.items.length });
+      }
+      tab.updatedAt = DB.nowIso();
+      closeModal();
+      DB.touch();
+    }
+
+    title.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); fields.focus(); }
+    });
+    [content, fields].forEach(function (ta) {
+      ta.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); save(); }
+        e.stopPropagation();
+      });
+    });
+
+    showModal({
+      title: isNew ? '新增一筆' : '管理欄位',
+      body: wrap,
+      noEscape: true,
+      buttons: [
+        { text: '取消', onClick: closeModal },
+        { text: '儲存', cls: 'btn-primary', onClick: save }
+      ]
+    });
+    // showModal 會把焦點給第一個輸入框；那可能是藏起來的那一格
+    (kind === 'form' ? title : content).focus();
+  }
+
   function labeledInput(wrap, labelText, type, value, placeholder) {
     var l = document.createElement('label');
     l.textContent = labelText;
@@ -1712,6 +1833,70 @@
     });
   }
 
+  /**
+   * 通用的清單列拖曳（v4.24：待辦、倒數、私人卡片的每一筆）。
+   * group 相同才能放：倒數用它限制在「同一天、同一個時間」之內，
+   * 其他清單整張卡片就是一組。實際怎麼搬由呼叫端給的 move 決定。
+   */
+  var dragItem = null;
+
+  function attachItemDrag(el, tab, id, group, move) {
+    el.addEventListener('dragstart', function (e) {
+      dragItem = { tabId: tab.id, id: id, group: group };
+      el.classList.add('dragging');
+      try { e.dataTransfer.setData('text/plain', id); } catch (err) { /* 忽略 */ }
+      e.dataTransfer.effectAllowed = 'move';
+      e.stopPropagation();
+    });
+
+    el.addEventListener('dragend', function (e) {
+      dragItem = null;
+      el.draggable = false;
+      el.classList.remove('dragging');
+      clearRowDropMarks();
+      e.stopPropagation();
+    });
+
+    function ok() {
+      return dragItem && dragItem.id !== id && dragItem.tabId === tab.id &&
+             dragItem.group === group;
+    }
+
+    el.addEventListener('dragover', function (e) {
+      if (!ok()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('row-drop-target');
+    });
+
+    el.addEventListener('dragleave', function () {
+      el.classList.remove('row-drop-target');
+    });
+
+    el.addEventListener('drop', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.remove('row-drop-target');
+      var go = ok();
+      var from = dragItem && dragItem.id;
+      dragItem = null;
+      if (go) move(from, id);
+    });
+  }
+
+  /** 私人卡片的一筆換位置。加密的卡片由 savePrivate 重新加密後存回去。 */
+  function movePrivate(tab, fromId, toId) {
+    var list = (privateEntries(tab) || []).slice();
+    var a = list.findIndex(function (x) { return x.id === fromId; });
+    var b = list.findIndex(function (x) { return x.id === toId; });
+    if (a < 0 || b < 0 || a === b) return;
+    var moved = list.splice(a, 1)[0];
+    list.splice(b, 0, moved);
+    setPrivateEntries(tab, list);
+    savePrivate(tab);
+  }
+
   function clearRowDropMarks() {
     Array.prototype.forEach.call(
       document.querySelectorAll('.row-drop-target'),
@@ -1853,7 +2038,16 @@
       });
     }
     if (tab.type === 'note') {
-      return (tab.items || []).some(function (i) { return matchText(i.content); });
+      /* 欄位型別：標題行與欄位名是資料，參與搜尋；
+         填進去的值根本沒存，不參與（使用者定的） */
+      return (tab.items || []).some(function (i) {
+        if (i.kind === 'form') {
+          return matchText(i.title) || (i.fields || []).some(function (f) {
+            return matchText(f.label);
+          });
+        }
+        return matchText(i.content);
+      });
     }
     if (tab.type === 'todo' || tab.type === 'countdown') {
       return (tab.items || []).some(function (i) { return matchText(i.text); });
@@ -2021,6 +2215,11 @@
       attachDrag: attachCardDrag,
       attachRowDrag: attachRowDrag,
       attachNoteDrag: attachNoteDrag,
+      // 待辦、倒數、私人卡片的每一筆（v4.24）
+      attachItemDrag: attachItemDrag,
+      movePrivate: movePrivate,
+      // 便籤新增一筆（先選型別）、欄位型別的「管理欄位」
+      editNoteItem: editNoteItem,
       attachLinkDrag: attachLinkDrag,
       editPhrase: editPhrase,
       editDueItem: editDueItem,
@@ -2370,41 +2569,128 @@
      新增卡片
      ============================================================ */
 
-  var TYPES = [
-    ['quickphrase', '常用語', '雙欄清單，點一下複製內容'],
-    ['note', '便籤', '一段自由文字'],
-    ['todo', '待辦清單', '可勾選的任務'],
-    ['countdown', '倒數提醒', '顯示距離某天還有幾天'],
-    ['link', '連結收藏', '常用網址清單'],
-    ['private', '私人', '加密保存，需要主密碼才看得到'],
-    ['codegen', '編碼', '選好選項產生一段文案與一組隨機碼'],
-    ['form', '表單', '填幾個欄位，照你的格式產生一段可以複製的文字'],
-    ['table', '表格／參考清單', '（尚未實作）']
-  ];
+  /* 類型的名稱與說明。順序不在這裡：出廠順序是 DB.CARD_TYPES，
+     使用者排過的順序是 DB.typeOrder()（v4.23，跟著匯出匯入與同步走）。 */
+  var TYPES = {
+    quickphrase: ['常用語', '雙欄清單，點一下複製內容'],
+    note: ['便籤', '自由文字，或一排固定欄位'],
+    todo: ['待辦清單', '可勾選的任務'],
+    countdown: ['倒數提醒', '顯示距離某天還有幾天'],
+    link: ['連結收藏', '常用網址清單'],
+    private: ['私人', '加密保存，需要主密碼才看得到'],
+    codegen: ['編碼', '選好選項產生一段文案與一組隨機碼'],
+    form: ['表單', '填幾個欄位，照你的格式產生一段可以複製的文字'],
+    table: ['表格／參考清單', '（尚未實作）']
+  };
+
+  var dragType = null;
+
+  /**
+   * 選擇卡片類型的那一排磁磚。可以拖曳排序：
+   * - 只有左上角的 ⠿ 能起拖（7.1）。磁磚本身按下去是「建立這種卡片」，
+   *   整格可拖會讓「點一下」跟「按住拖」搶同一塊（11.1）
+   * - 把手跟磁磚是**兄弟**，不是包在按鈕裡：點到把手不會建立卡片
+   * - 放開就存，彈窗不關；只重畫這一排，而且順序沒變就不重畫（11.20）
+   * - 停用的「表格／參考清單」照樣可以拖（使用者選的）
+   */
+  function fillTypeGrid(grid) {
+    var order = DB.typeOrder();
+    var sig = order.join(',');
+    if (grid.dataset.sig === sig) return;
+    grid.dataset.sig = sig;
+    grid.innerHTML = '';
+
+    order.forEach(function (type) {
+      var t = TYPES[type];
+      if (!t) return;
+      var cell = document.createElement('div');
+      cell.className = 'type-cell';
+      cell.dataset.type = type;
+
+      var b = document.createElement('button');
+      b.className = 'type-opt';
+      var st = document.createElement('strong');
+      st.textContent = t[0];
+      var sm = document.createElement('small');
+      sm.textContent = t[1];
+      b.appendChild(st);
+      b.appendChild(sm);
+      if (type === 'table') {
+        b.disabled = true;
+      } else {
+        b.addEventListener('click', function () {
+          closeModal();
+          if (type === 'private') { askPrivateMode(); return; }
+          promptModal('新增' + t[0], '卡片標題', t[0], function (title) {
+            DB.addTab(type, state.currentCategoryId, title);
+          });
+        });
+      }
+      cell.appendChild(b);
+
+      var grip = document.createElement('span');
+      grip.className = 'type-grip';
+      grip.textContent = '⠿';
+      grip.title = '按住拖曳可調整順序';
+      grip.addEventListener('mousedown', function (e) {
+        e.stopPropagation();
+        cell.draggable = true;
+      });
+      // 按下去沒拖就放開：把可拖關回去，不然下一次點磁磚可能變成拖曳
+      grip.addEventListener('mouseup', function () { cell.draggable = false; });
+      grip.addEventListener('click', function (e) { e.stopPropagation(); });
+      cell.appendChild(grip);
+
+      cell.addEventListener('dragstart', function (e) {
+        dragType = type;
+        cell.classList.add('dragging');
+        try { e.dataTransfer.setData('text/plain', type); } catch (err) { /* 忽略 */ }
+        e.dataTransfer.effectAllowed = 'move';
+        e.stopPropagation();
+      });
+      cell.addEventListener('dragend', function (e) {
+        dragType = null;
+        cell.draggable = false;
+        cell.classList.remove('dragging');
+        clearTypeDropMarks(grid);
+        e.stopPropagation();
+      });
+      cell.addEventListener('dragover', function (e) {
+        if (!dragType || dragType === type) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'move';
+        cell.classList.add('row-drop-target');
+      });
+      cell.addEventListener('dragleave', function () {
+        cell.classList.remove('row-drop-target');
+      });
+      cell.addEventListener('drop', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var from = dragType;
+        dragType = null;
+        clearTypeDropMarks(grid);
+        if (!from || from === type) return;
+        DB.moveType(from, type);
+        fillTypeGrid(grid);
+      });
+
+      grid.appendChild(cell);
+    });
+  }
+
+  function clearTypeDropMarks(grid) {
+    Array.prototype.forEach.call(grid.querySelectorAll('.row-drop-target'),
+      function (x) { x.classList.remove('row-drop-target'); });
+  }
 
   function openAddTab() {
     if (!state.currentCategoryId) return;
 
     var grid = document.createElement('div');
     grid.className = 'type-grid';
-
-    TYPES.forEach(function (t) {
-      var b = document.createElement('button');
-      b.className = 'type-opt';
-      b.innerHTML = '<strong>' + t[1] + '</strong><small>' + t[2] + '</small>';
-      if (t[0] === 'table') {
-        b.disabled = true;
-      } else {
-        b.addEventListener('click', function () {
-          closeModal();
-          if (t[0] === 'private') { askPrivateMode(); return; }
-          promptModal('新增' + t[1], '卡片標題', t[1], function (title) {
-            DB.addTab(t[0], state.currentCategoryId, title);
-          });
-        });
-      }
-      grid.appendChild(b);
-    });
+    fillTypeGrid(grid);
 
     showModal({
       title: '選擇卡片類型',

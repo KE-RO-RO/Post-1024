@@ -513,6 +513,14 @@
     DB.onChange(function () {
       if (st.state !== 'out') scheduleAuto();
     });
+    /* 不重畫的變更（就地編輯文字、改標題、記住高度、連結勾選）不會發 onChange，
+       要另外聽 onDirty，否則那些修改不會排上傳（v4.24 修正）。
+       一般變更兩個都會發，scheduleAuto 只是把計時器重設一次，沒有副作用。 */
+    if (DB.onDirty) {
+      DB.onDirty(function () {
+        if (st.state !== 'out') scheduleAuto();
+      });
+    }
 
     window.addEventListener('online', function () {
       if (st.state === 'offline') syncNow();

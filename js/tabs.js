@@ -182,6 +182,25 @@
     return b;
   }
 
+  /**
+   * 清單列的拖曳把手（v4.24：待辦、倒數、私人卡片的每一筆）。
+   * 跟卡片、常用語、便籤、連結同一套：平常隱藏、滑到那一列才浮現，
+   * 按住把手才讓那一列變成可拖（7.1）。唯讀（小視窗）時不給。
+   */
+  function listGrip(rowEl) {
+    var g = document.createElement('span');
+    g.className = 'li-grip';
+    g.textContent = '⠿';
+    g.title = '按住拖曳可調整順序';
+    g.addEventListener('mousedown', function (e) {
+      e.stopPropagation();
+      rowEl.draggable = true;
+    });
+    g.addEventListener('mouseup', function () { rowEl.draggable = false; });
+    g.addEventListener('click', function (e) { e.stopPropagation(); });
+    return g;
+  }
+
   /* ---------- 卡片外框 ---------- */
 
   function renderCard(tab, ctx) {
@@ -437,6 +456,150 @@
     return t.length > 60 ? t.slice(0, 60) + '…' : t;
   }
 
+  /* ============================================================
+     便籤的「欄位」型別（v4.23）
+     ------------------------------------------------------------
+     每一筆各自是自由格式（free）或欄位（form）。欄位那種是
+     「標題行＋一排『欄位名：值』」，冒號右邊隨意填、隨意清，
+     填完整張（含標題與空欄位）一起複製。
+
+     **填進去的值不存**（使用者定的，同編碼卡、表單卡）：只放在這個
+     記憶體物件裡，重新整理回到預設值。小視窗與主視窗共用同一份
+     （兩邊都是這個模組在畫），但畫面不會即時互相更新（4.12 的已知落差）。
+
+     欄位名不能在卡片上點著改：右邊是填值，左邊再承載改名就是 11.1。
+     改欄位一律走「管理欄位」的彈窗。
+     ============================================================ */
+
+  var noteVals = {};
+
+  function noteVal(item, f) {
+    var m = noteVals[item.id];
+    return m && Object.prototype.hasOwnProperty.call(m, f.id) ? m[f.id] : (f.def || '');
+  }
+
+  function setNoteVal(item, f, v) {
+    if (!noteVals[item.id]) noteVals[item.id] = {};
+    noteVals[item.id][f.id] = v;
+  }
+
+  /** 摺疊時露出來的那一行：標題；標題留空就用第一個有填的欄位 */
+  function noteFormSummary(item) {
+    var t = (item.title || '').trim();
+    if (t) return t;
+    var fields = item.fields || [];
+    for (var i = 0; i < fields.length; i++) {
+      var v = String(noteVal(item, fields[i]) || '').trim();
+      if (v) return fields[i].label + '：' + v;
+    }
+    return fields.length ? fields[0].label : '';
+  }
+
+  /** 刪除確認、提示訊息裡要稱呼這一筆時用的名字 */
+  function noteItemName(item) {
+    if (item.kind === 'form') {
+      return (item.title || '').trim() || ((item.fields || [])[0] || {}).label || '';
+    }
+    return firstLine(item.content);
+  }
+
+  function renderNoteForm(tab, item, box, ctx) {
+    var fb = document.createElement('div');
+    fb.className = 'nf-body';
+
+    if ((item.title || '').trim()) {
+      var t = document.createElement('div');
+      t.className = 'nf-title';
+      setText(t, item.title.trim());
+      fb.appendChild(t);
+    }
+
+    var fields = item.fields || [];
+    var inputs = [];
+    if (fields.length) {
+      var rows = document.createElement('div');
+      rows.className = 'nf-rows';
+      fields.forEach(function (f, n) {
+        var l = document.createElement('span');
+        l.className = 'nf-label';
+        l.title = f.label;   // 欄位名太長被截掉時，滑過去看得到全文
+        setText(l, f.label);
+        rows.appendChild(l);
+
+        var inp = document.createElement('input');
+        inp.type = 'text';
+        inp.className = 'nf-input';
+        inp.value = noteVal(item, f);
+        inp.setAttribute('aria-label', f.label);
+        inp.addEventListener('input', function () { setNoteVal(item, f, inp.value); });
+        inp.addEventListener('keydown', function (e) {
+          // 按鍵不能漏到外面去觸發複製鍵
+          e.stopPropagation();
+          // Enter 跳下一欄，一路往下填比較順手
+          if (e.key === 'Enter' && !e.isComposing) {
+            e.preventDefault();
+            if (inputs[n + 1]) inputs[n + 1].focus();
+          }
+        });
+        inputs.push(inp);
+        rows.appendChild(inp);
+      });
+      fb.appendChild(rows);
+    } else {
+      var hint = document.createElement('div');
+      hint.className = 'row-hint';
+      hint.textContent = RO ? '還沒有欄位' : '還沒有欄位，點「管理欄位」設定';
+      fb.appendChild(hint);
+    }
+
+    var acts = document.createElement('div');
+    acts.className = 'nf-actions';
+
+    var copy = document.createElement('button');
+    copy.className = 'nf-btn nf-main pip-ok';
+    copy.textContent = '複製';
+    copy.title = '整張複製：標題行＋所有欄位，空的也會印出來';
+    copy.addEventListener('click', function (e) {
+      e.stopPropagation();
+      Clip.copy(DB.noteFormText(item, function (f) { return noteVal(item, f); }),
+        copy, noteItemName(item) || '欄位');
+    });
+    acts.appendChild(copy);
+
+    var clear = document.createElement('button');
+    clear.className = 'nf-btn pip-ok';
+    clear.textContent = '一鍵清空';
+    clear.title = '只清填進去的值，欄位名不動；有預設值的回到預設值';
+    clear.addEventListener('click', function (e) {
+      e.stopPropagation();
+      delete noteVals[item.id];
+      // 直接改輸入框就好，不重畫（11.20）
+      fields.forEach(function (f, n) { if (inputs[n]) inputs[n].value = f.def || ''; });
+      if (inputs[0]) inputs[0].focus();
+    });
+    acts.appendChild(clear);
+
+    if (!RO) {
+      var mg = document.createElement('button');
+      mg.className = 'nf-btn';
+      mg.textContent = '管理欄位';
+      mg.title = '改標題行、欄位名、預設值與順序';
+      mg.addEventListener('click', function (e) {
+        e.stopPropagation();
+        ctx.editNoteItem(tab, item);
+      });
+      acts.appendChild(mg);
+    }
+
+    var tip = document.createElement('span');
+    tip.className = 'nf-hint';
+    tip.textContent = '複製會含標題與空欄位';
+    acts.appendChild(tip);
+
+    fb.appendChild(acts);
+    box.appendChild(fb);
+  }
+
   function renderNote(tab, body, ctx) {
     tab.items = tab.items || [];
 
@@ -444,9 +607,10 @@
 
     list.forEach(function (item) {
       var open = item.open !== false;
+      var isForm = item.kind === 'form';
 
       var wrap = document.createElement('div');
-      wrap.className = 'nt-item' + (open ? ' open' : '');
+      wrap.className = 'nt-item' + (open ? ' open' : '') + (isForm ? ' nt-form' : '');
 
       var head = document.createElement('div');
       head.className = 'nt-head';
@@ -468,12 +632,15 @@
       // 展開時標題列不重複寫第一行，內容區底下已經有了
       var summary = document.createElement('div');
       summary.className = 'nt-summary';
-      if (!open) setText(summary, firstLine(item.content), '還沒有內容');
+      if (!open) {
+        setText(summary, isForm ? noteFormSummary(item) : firstLine(item.content), '還沒有內容');
+      }
       head.appendChild(summary);
 
       /* 展開鈕放右邊，跟刪除排在一起。
-         這裡刻意沒有複製鈕：便籤是拿來看跟改的，要複製就進編輯框自己選取，
-         一筆一顆複製鈕會讓標題列擠成一排符號。 */
+         自由格式刻意沒有複製鈕：便籤是拿來看跟改的，要複製就進編輯框自己選取，
+         一筆一顆複製鈕會讓標題列擠成一排符號（第 12 章）。
+         欄位型別的複製鈕在內容區底下，不在標題列上。 */
       head.appendChild(iconBtn(open ? '▾' : '▸', open ? '收合' : '展開', function () {
         item.open = !open;
         tab.updatedAt = DB.nowIso();
@@ -483,10 +650,11 @@
       head.appendChild(iconBtn('✕', '刪除這一筆', function () {
         ctx.confirmDelete(
           '刪除便籤',
-          '將刪除「' + (firstLine(item.content) || '未命名') + '」這一筆。',
+          '將刪除「' + (noteItemName(item) || '未命名') + '」這一筆。',
           function () {
             tab.items = tab.items.filter(function (x) { return x.id !== item.id; });
             tab.items.forEach(function (x, n) { x.order = n; });
+            delete noteVals[item.id];
             tab.updatedAt = DB.nowIso();
             DB.touch();
           }
@@ -495,7 +663,9 @@
 
       wrap.appendChild(head);
 
-      if (open) {
+      if (open && isForm) {
+        renderNoteForm(tab, item, wrap, ctx);
+      } else if (open) {
         var p = document.createElement('div');
         p.className = 'nt-body';
         /* 記住的高度同時套在顯示與編輯兩種狀態上。只套編輯框的話，
@@ -534,14 +704,12 @@
       body.appendChild(hint);
     }
 
+    /* 新增時先選型別（自由格式／欄位），比照私人卡片每一筆各自選（9.9）。
+       彈窗由 app.js 畫，樣子才會跟其他編輯視窗一致。 */
     var add = document.createElement('button');
     add.className = 'row-add';
     add.textContent = '＋ 新增一筆';
-    add.addEventListener('click', function () {
-      tab.items.push({ id: DB.uid(), content: '', open: true, order: tab.items.length });
-      tab.updatedAt = DB.nowIso();
-      DB.touch();
-    });
+    add.addEventListener('click', function () { ctx.editNoteItem(tab, null); });
     body.appendChild(add);
   }
 
@@ -677,6 +845,13 @@
     tab.items.slice().sort(function (a, b) { return a.order - b.order; }).forEach(function (item) {
       var row = document.createElement('div');
       row.className = 'todo-row' + (item.done ? ' done' : '');
+
+      if (!RO) {
+        row.appendChild(listGrip(row));
+        ctx.attachItemDrag(row, tab, item.id, 'todo', function (from, to) {
+          DB.moveItem(tab.id, from, to);
+        });
+      }
 
       var cb = document.createElement('input');
       cb.type = 'checkbox';
@@ -821,6 +996,15 @@
       var row = document.createElement('div');
       row.className = 'todo-row cd-row' + (item.done ? ' done' : '');
 
+      /* 倒數仍然先依日期分組、同一天依時間排（使用者選的：同一天之內可以拖）。
+         所以只准拖到「同一組、同一個時間」的那幾筆之間——拖到別組去，
+         重畫後又會被日期排回原位，看起來像沒反應。 */
+      if (!RO) {
+        row.appendChild(listGrip(row));
+        ctx.attachItemDrag(row, tab, item.id, groupKey(item) + '|' + (item.time || ''),
+          function (from, to) { DB.moveItem(tab.id, from, to); });
+      }
+
       var cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.checked = !!item.done;
@@ -892,14 +1076,23 @@
   /* ---------- 連結收藏 ---------- */
 
   /**
-   * 勾選狀態刻意不寫進資料檔，只留在記憶體裡。
-   * 這是「這次要開哪幾個」的暫時選擇，不是使用者的設定，
-   * 存起來反而會讓下次打開時看到莫名其妙的勾選結果。
+   * 勾選狀態寫進資料檔（v4.24，使用者要的：重新登入、換電腦都是上次勾的樣子）。
+   * 只記「沒勾」的（link.off），預設全勾，舊資料畫面不變。
+   * 勾選不重畫（touch(true)），不然正在連點下一個勾選框時元素會被換掉（11.20）；
+   * 雲端同步靠 DB.onDirty 照樣排得上。
    */
-  var linkChecked = {};
+  function isChecked(link) {
+    return link.off !== true;
+  }
 
-  function isChecked(id) {
-    return linkChecked[id] !== false;   // 預設全勾
+  function setChecked(tab, link, on) {
+    if (on) delete link.off;
+    else link.off = true;
+  }
+
+  function commitChecks(tab) {
+    tab.updatedAt = DB.nowIso();
+    DB.touch(true);
   }
 
   /**
@@ -933,7 +1126,7 @@
 
     function refreshCount() {
       if (!countEl) return;
-      var n = links.filter(function (l) { return isChecked(l.id) && (l.urls || []).length; }).length;
+      var n = links.filter(function (l) { return isChecked(l) && (l.urls || []).length; }).length;
       countEl.textContent = '開啟已勾選（' + n + '）';
       countEl.disabled = n === 0;
     }
@@ -946,24 +1139,26 @@
       selAll.className = 'link-mini pip-ok';
       selAll.textContent = '全選';
       selAll.addEventListener('click', function () {
-        links.forEach(function (l) { linkChecked[l.id] = true; });
+        links.forEach(function (l) { setChecked(tab, l, true); });
         body.querySelectorAll('.link-check').forEach(function (c) { c.checked = true; });
         refreshCount();
+        commitChecks(tab);
       });
 
       var selNone = document.createElement('button');
       selNone.className = 'link-mini pip-ok';
       selNone.textContent = '取消全選';
       selNone.addEventListener('click', function () {
-        links.forEach(function (l) { linkChecked[l.id] = false; });
+        links.forEach(function (l) { setChecked(tab, l, false); });
         body.querySelectorAll('.link-check').forEach(function (c) { c.checked = false; });
         refreshCount();
+        commitChecks(tab);
       });
 
       countEl = document.createElement('button');
       countEl.className = 'btn-primary link-open';
       countEl.addEventListener('click', function () {
-        ctx.openLinks(links.filter(function (l) { return isChecked(l.id); }), pickUrl);
+        ctx.openLinks(links.filter(function (l) { return isChecked(l); }), pickUrl);
       });
 
       bar.appendChild(selAll);
@@ -995,11 +1190,12 @@
       var cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.className = 'link-check';
-      cb.checked = isChecked(link.id);
-      cb.title = '勾選後可批次開啟';
+      cb.checked = isChecked(link);
+      cb.title = '勾選後可批次開啟（會記住）';
       cb.addEventListener('change', function () {
-        linkChecked[link.id] = cb.checked;
+        setChecked(tab, link, cb.checked);
         refreshCount();
+        commitChecks(tab);
       });
       row.appendChild(cb);
 
@@ -1058,7 +1254,6 @@
           '將刪除「' + (link.name || urls[0] || '未命名') + '」這個項目。',
           function () {
             tab.links = tab.links.filter(function (x) { return x.id !== link.id; });
-            delete linkChecked[link.id];
             DB.touch();
           }
         );
@@ -1212,6 +1407,14 @@
 
       var head = document.createElement('div');
       head.className = 'pv-head' + (open ? '' : ' collapsed');
+
+      // 能走到這裡代表內容已經在手上（不加密，或已解鎖），排完照樣加密存回去
+      if (!RO) {
+        head.appendChild(listGrip(row));
+        ctx.attachItemDrag(row, tab, item.id, 'pv', function (from, to) {
+          ctx.movePrivate(tab, from, to);
+        });
+      }
 
       // 展開鈕。摺疊時整列只露出名稱，型別不標——標了等於幫人分類
       var tri = document.createElement('button');
