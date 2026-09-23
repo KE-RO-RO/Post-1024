@@ -482,6 +482,7 @@ body::before {
 
 /* 搜尋時看到的是過濾後的結果，拖曳算出來的順序是錯的，所以把手直接不出現 */
 #cardGrid.searching .drag-handle,
+#cardGrid.searching .li-grip,
 #cardGrid.searching .link-grip,
 #cardGrid.searching .qp-grip { visibility: hidden; }
 
@@ -797,6 +798,30 @@ textarea.inline-edit, input.inline-edit {
 .type-opt:hover { border-color: var(--accent-line); background: var(--accent-soft); }
 .type-opt small { display: block; color: var(--text-faint); font-size: 11px; margin-top: 3px; }
 .type-opt[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+/* v4.23：類型可以拖曳排序。把手與磁磚是兄弟元素，疊在左上角；
+   磁磚左邊多留一點空間給它，點把手不會按到磁磚（11.1） */
+.type-cell { position: relative; display: grid; }
+.type-cell .type-opt { padding-left: 24px; }
+.type-grip {
+  position: absolute;
+  top: 10px;
+  left: 6px;
+  width: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-faint);
+  cursor: grab;
+  opacity: 0;
+  user-select: none;
+  transition: opacity 0.12s;
+}
+.type-cell:hover .type-grip { opacity: 1; }
+.type-grip:hover { color: var(--accent); }
+.type-grip:active { cursor: grabbing; }
+.type-cell.dragging { opacity: 0.4; }
+/* 插入位置：左緣一條線，同其他清單的 row-drop-target */
+.type-cell.row-drop-target .type-opt { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* ---------- ☰ 選單 ---------- */
 #menuPanel {
@@ -2168,3 +2193,105 @@ textarea,
 /* 快滿了才換顏色。平常不吵人，門檻到了要一眼看出來 */
 .qbar-fill[data-level="warn"] { background: var(--warn); }
 .qbar-fill[data-level="full"] { background: var(--danger); }
+
+
+/* ============================================================
+   v4.23：便籤的「欄位」型別
+   ------------------------------------------------------------
+   外觀照使用者看過的 A 案截圖：標題行加粗、欄位名在左、輸入框在右，
+   底下一排「複製／一鍵清空／管理欄位」。
+   所有欄位共用同一個 grid，欄位名那一欄才對得齊（11.4）。
+   欄位名那一欄最多佔 45%、自己出刪節號；輸入框至少 80px，
+   欄位名再長也不會把它壓成 0（11.51）。
+   ============================================================ */
+
+.nf-body { padding: 2px 6px 8px 6px; }
+.nf-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 2px 0 8px;
+  overflow-wrap: anywhere;
+}
+.nf-rows {
+  display: grid;
+  grid-template-columns: fit-content(45%) minmax(80px, 1fr);
+  gap: 6px 8px;
+  align-items: center;
+}
+.nf-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.nf-label::after { content: '：'; }
+.nf-input {
+  min-width: 0;
+  width: 100%;
+  font-size: 12.5px;
+  line-height: 18px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+}
+.nf-input:focus { outline: none; border-color: var(--accent-line); }
+.nf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+/* 高度固定，不由字決定（11.41） */
+.nf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 18px;
+  padding: 3px 9px;
+  font-size: 11.5px;
+  font-family: inherit;
+  color: var(--text-dim);
+  background: var(--raise-xs);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.nf-btn:hover { color: var(--text); border-color: var(--accent-line); }
+.nf-btn.nf-main { color: var(--text); border-color: var(--accent-line); }
+.nf-btn.copied { background: var(--accent-soft); }
+.nf-hint { margin-left: auto; font-size: 10.5px; color: var(--text-faint); }
+
+
+/* ============================================================
+   v4.24：待辦、倒數、私人卡片的每一筆也能拖曳排序
+   把手跟連結列同一個樣子：平常隱藏，滑到那一列才浮現。
+   ============================================================ */
+.li-grip {
+  flex: 0 0 12px;
+  width: 12px;
+  color: var(--text-faint);
+  cursor: grab;
+  font-size: 12px;
+  line-height: 20px;
+  letter-spacing: -1px;
+  user-select: none;
+  opacity: 0;
+  text-align: center;
+}
+.todo-row .li-grip { margin-right: -4px; }
+.todo-row:hover .li-grip,
+.pv-row:hover .li-grip { opacity: 1; }
+.li-grip:hover { color: var(--accent); }
+.li-grip:active { cursor: grabbing; }
+.todo-row.dragging,
+.pv-row.dragging { opacity: 0.35; }
+.todo-row.row-drop-target,
+.link-row.row-drop-target { box-shadow: inset 0 2px 0 var(--accent); }
+.pv-row.row-drop-target { border-color: var(--accent); }
