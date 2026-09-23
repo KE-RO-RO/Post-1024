@@ -230,19 +230,12 @@
 
   /* ---------- 開關與重繪 ---------- */
 
-  /* 圖釘自繪 SVG（同 11.5）。釘著＝置頂，劃掉＝不置頂。 */
+  /* 圖釘自繪 SVG（同 11.5）。只出現在置頂視窗上（v4.25）。 */
   var PIN_SVG =
     '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
     'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M9.2 3.4h5.6l-1 5.2 2.8 2.8v1.8H7.4v-1.8l2.8-2.8-1-5.2Z"/>' +
     '<path d="M12 13.2V21"/></svg>';
-
-  var PIN_OFF_SVG =
-    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
-    'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M9.2 3.4h5.6l-1 5.2 2.8 2.8v1.8H7.4v-1.8l2.8-2.8-1-5.2Z"/>' +
-    '<path d="M12 13.2V21"/>' +
-    '<path d="M3.6 3.6l16.8 16.8"/></svg>';
 
   function render() {
     if (!win || win.closed) return;
@@ -260,14 +253,17 @@
     /* 當場切換置頂／不置頂。做在小視窗自己的標題列上，而不是疊在
        主視窗那顆彈出鈕上——那顆按下去是「彈出」，再承載一種語意就是 11.1。
        填進去的值只在記憶體，換視窗不會掉。 */
+    /* v4.25：只有置頂視窗有圖釘（置頂 → 不置頂）。
+       不置頂 → 置頂在 Chrome 上做不到：置頂視窗只能由「剛被點的那個視窗」開，
+       而且跟著開它的視窗走——不置頂視窗一關，它開出來的置頂視窗也跟著消失
+       （實機確認過，11.57）。所以不置頂視窗不放圖釘，要置頂一律從主視窗的
+       彈出鈕開（使用者看過三案截圖後選的 C 案）。 */
     var head = card.querySelector('.card-head');
-    if (head) {
+    if (head && mode === 'pip') {
       var b = document.createElement('button');
       b.className = 'icon-btn pip-ok pip-mode-btn';
-      b.innerHTML = mode === 'pip' ? PIN_SVG : PIN_OFF_SVG;
-      b.title = mode === 'pip'
-        ? '目前置頂，點一下改成不置頂（會被其他視窗蓋住）'
-        : '目前不置頂，點一下改成浮在最上層';
+      b.innerHTML = PIN_SVG;
+      b.title = '目前置頂，點一下改成不置頂（會被其他視窗蓋住）';
       b.addEventListener('click', function (e) {
         e.stopPropagation();
         switchMode();
@@ -347,11 +343,7 @@
     }
   }
 
-  // 這個置頂視窗是不是從不置頂視窗借來開的（見 switchMode）
-  var borrowed = false;
-
   function onWinGone() {
-    borrowed = false;
     win = null;
     curId = null;
     hotkeys = {};
@@ -375,7 +367,6 @@
       win = w;
       mode = 'pip';
       curId = tab.id;
-      borrowed = false;
       prepareDoc(w);
       render();
       if (ui.onChange) ui.onChange();
@@ -415,7 +406,6 @@
     win = w;
     mode = 'win';
     curId = tab.id;
-    borrowed = false;
     prepareDoc(w);
     render();
     w.focus();
@@ -471,72 +461,22 @@
     if (mode === 'pip') {
       var pipWin = (win && !win.closed) ? win : null;
       // 先開新的再關舊的：開不起來時置頂視窗還在，不會兩個都沒有
-      var prevWin = win, prevBorrowed = borrowed;
+      var prevWin = win;
       openWindowed(tab, pipWin);
       if (win !== prevWin && pipWin) {
         try { pipWin.removeEventListener('pagehide', onWinGone); } catch (e) { /* 忽略 */ }
         try { pipWin.close(); } catch (e) { /* 忽略 */ }
-      } else {
-        borrowed = prevBorrowed;
       }
       return;
     }
 
-    if (!supported()) {
-      Clip.toast('這個瀏覽器不支援置頂小視窗', true);
-      return;
-    }
-    /* 切成置頂（v4.25 修正）。
-       以前是先關掉不置頂視窗、再用主視窗的 requestWindow 開置頂——但那個
-       點擊發生在不置頂視窗上，主視窗沒有使用者動作，實機上一律被拒（11.52），
-       結果只是把不置頂視窗關掉又開回來，看起來就是「點了沒反應」。
-       改成用**不置頂視窗自己的** documentPictureInPicture 開：點擊就發生在
-       那份文件上，使用者動作是它的。開成功才把不置頂視窗關掉；
-       失敗就留著原本的視窗，在它自己身上講原因（11.26：提示要出現在看得到的那份文件）。 */
-    var old = (win && !win.closed && mode === 'win') ? win : null;
-    var api = null;
-    try { api = old && old.documentPictureInPicture; } catch (e) { api = null; }
-    if (!api) {
-      // 沒有不置頂視窗可借（理論上不會發生）：走原本的路
-      if (win && !win.closed) close();
-      openPip(tab, function () {
-        Clip.toast('這個瀏覽器不讓小視窗自己切成置頂，請用卡片上的彈出鈕', true);
-        openWindowed(tab);
-      });
-      return;
-    }
-
-    var size = DB.pipSize();
-    api.requestWindow({ width: size.w, height: size.h }).then(function (w) {
-      try { old.removeEventListener('pagehide', onWinGone); } catch (e) { /* 忽略 */ }
-      win = w;
-      mode = 'pip';
-      curId = tab.id;
-      borrowed = true;
-      prepareDoc(w);
-      render();
-      try { old.close(); } catch (e) { /* 忽略 */ }
-      if (ui.onChange) ui.onChange();
-      /* 保險：萬一瀏覽器把「借來開的置頂視窗」跟著不置頂視窗一起收掉，
-         不能讓使用者落到兩個都沒有。沙盒的 Chromium 不會收，實機要驗。 */
-      setTimeout(function () {
-        if (win === w && w.closed) {
-          onWinGone();
-          Clip.toast('置頂視窗被瀏覽器關掉了，請用卡片上的彈出鈕重開', true);
-        }
-      }, 1200);
-    }, function (e) {
-      Clip.toast('沒辦法切成置頂：' + (e && e.message ? e.message : '瀏覽器拒絕') +
-        '。可以改用主視窗卡片上的彈出鈕', true, old.document);
-    });
+    // 不置頂視窗沒有圖釘（見 render），所以不會走到這裡
   }
 
   /* 一般彈出視窗不會跟著開啟它的分頁一起消失（PiP 會）。
      主視窗關掉或重新整理時把它收掉，不然它會變成一個沒有人在更新的死畫面。 */
-  /* 從不置頂視窗借開的置頂視窗（borrowed）不是主視窗開的，
-     主視窗關掉時瀏覽器不會替它收，一樣要自己關。 */
   window.addEventListener('pagehide', function () {
-    if (win && !win.closed && (mode === 'win' || borrowed)) {
+    if (win && !win.closed && mode === 'win') {
       try { win.close(); } catch (e) { /* 忽略 */ }
     }
   });
