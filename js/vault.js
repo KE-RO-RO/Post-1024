@@ -163,6 +163,8 @@
    */
   function startTimer(tabId, minutes) {
     clearTimer(tabId);
+    // 0 ＝不自動上鎖（TOTP 卡：只有手動鎖或登出才鎖，使用者 9/23 要的）
+    if (!(minutes > 0)) return;
     timers[tabId] = setTimeout(function () {
       lockCard(tabId);
       if (onLockCallback) onLockCallback(tabId, 'auto');
@@ -376,9 +378,8 @@
    */
   function dropMasterIfUnused() {
     var data = DB.raw();
-    var used = data.tabs.some(function (t) {
-      return t.type === 'private' && t.encrypted;
-    });
+    // 加密的私人卡片與驗證碼卡共用這組主密碼（DB.isVaultTab）
+    var used = data.tabs.some(function (t) { return DB.isVaultTab(t); });
     /* 保留區裡的加密卡片也算「還在用」：主密碼丟掉之後那張卡片就再也
        解不開了，還原回來只會得到一張打不開的殼。 */
     if (!used && DB.trashHasEncrypted && DB.trashHasEncrypted()) used = true;
@@ -401,7 +402,7 @@
     var data = DB.raw();
     delete data.vault;
     data.tabs = data.tabs.filter(function (t) {
-      return !(t.type === 'private' && t.encrypted);
+      return !DB.isVaultTab(t);
     });
     /* 保留區裡的加密卡片一起清掉。主密碼都重來了，留著也是打不開的殼，
        而且「全部清除重來」之後還原得出一張解不開的卡片會很莫名其妙。 */
@@ -409,10 +410,10 @@
       data.trash = data.trash.filter(function (e) {
         var list = e.kind === 'tab' ? [e.tab] : (e.tabs || []);
         if (e.kind === 'tab') {
-          return !(e.tab && e.tab.type === 'private' && e.tab.encrypted);
+          return !DB.isVaultTab(e.tab);
         }
         e.tabs = list.filter(function (t) {
-          return !(t && t.type === 'private' && t.encrypted);
+          return !DB.isVaultTab(t);
         });
         return true;
       });

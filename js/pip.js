@@ -145,10 +145,12 @@
 
     function go() {
       err.hidden = true;
-      Vault.unlockCard(tab.id, tab.vault, input.value, ui.autoLockMinutes || 10).then(
+      Vault.unlockCard(tab.id, tab.vault, input.value,
+        ui.lockMinutesFor ? ui.lockMinutesFor(tab) : (ui.autoLockMinutes || 10)).then(
         function () {
           close();
-          Clip.toast('已解鎖，' + (ui.autoLockMinutes || 10) + ' 分鐘後自動隱藏', false, d);
+          if (ui.unlockedToast) ui.unlockedToast(tab, d);
+          else Clip.toast('已解鎖，' + (ui.autoLockMinutes || 10) + ' 分鐘後自動鎖定', false, d);
           DB.touch();
         },
         function () {
@@ -211,6 +213,8 @@
     movePrivate: noop,
     // 便籤的新增與「管理欄位」都在主視窗做；小視窗只能填值與複製
     editNoteItem: noop,
+    editTotp: noop,
+    clockSkew: function () { return ui.clockSkew ? ui.clockSkew() : null; },
     attachLinkDrag: noop,
     editPhrase: noop,
     editDueItem: noop,
@@ -295,6 +299,7 @@
   function onBlur() {
     if (!curId) return;
     var tab = DB.findTab(curId);
+    // TOTP 卡不在失焦時遮：使用者工作時一直在別的視窗輸入驗證碼（v4.26 改成按眼睛手動遮）
     if (!tab || tab.type !== 'private') return;
     Tabs.collapsePrivate(curId);
     render();

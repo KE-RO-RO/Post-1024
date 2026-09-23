@@ -280,7 +280,7 @@
      之後新增卡片類型時，舊的資料檔不會讓它消失。
      沒排過就是 null，畫面用出廠順序。 */
   var CARD_TYPES = ['quickphrase', 'note', 'todo', 'countdown', 'link',
-                    'private', 'codegen', 'form', 'table'];
+                    'private', 'totp', 'codegen', 'form', 'table'];
 
   function normalizeTypeOrder(v) {
     if (!Array.isArray(v)) return null;
@@ -421,6 +421,14 @@
       base.enc = null;            // { iv, data }：加密後的內容，明文永不進硬碟
       base.entries = [];          // 不加密時的明文內容
     }
+    if (type === 'totp') {
+      /* 驗證碼卡一律加密，沒有「不加密」的選項：裡面放的是 2FA 金鑰。
+         用的是跟私人卡片同一組主密碼（使用者 9/23 選的），每張卡片一把金鑰，
+         結構與加密的私人卡片一模一樣，所以解鎖、自動上鎖、刪除驗身分都共用。 */
+      base.encrypted = true;
+      base.vault = null;
+      base.enc = null;
+    }
     return base;
   }
 
@@ -534,6 +542,227 @@
       lines.push(f.label + '：' + (v == null ? '' : String(v)));
     });
     return lines.join('\n');
+  }
+
+  /* ============================================================
+     驗證碼（TOTP，RFC 6238）
+     ------------------------------------------------------------
+     種子（金鑰）＋「現在是第幾個 30 秒」→ HMAC → 動態截斷取 6 位數。
+     跟手機上的 Authenticator 算法一樣，兩邊時鐘對就算出一樣的數字。
+     不需要網路，也不需要第三方函式庫（crypto.subtle 本來就有 HMAC）。
+     ============================================================ */
+
+  var TOTP_ALGOS = { SHA1: 'SHA-1', SHA256: 'SHA-256', SHA512: 'SHA-512' };
+
+  /** 把使用者貼的金鑰整理成標準 Base32：去空白與連字號、轉大寫、去等號。不合法回傳空字串 */
+  function totpCleanSecret(s) {
+    var v = String(s || '').replace(/[\s-]/g, '').replace(/=+$/, '').toUpperCase();
+    if (!v || !/^[A-Z2-7]+$/.test(v)) return '';
+    // 太短的不是真的金鑰（RFC 4226 建議至少 128 位元，常見的是 16 或 32 個字）
+    if (v.length < 8) return '';
+    return v;
+  }
+
+  function totpBase32Decode(s) {
+    var alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    var bits = 0, val = 0, out = [];
+    for (var i = 0; i < s.length; i++) {
+      var k = alpha.indexOf(s[i]);
+      if (k < 0) continue;
+      val = (val << 5) | k;
+      bits += 5;
+      if (bits >= 8) {
+        out.push((val >>> (bits - 8)) & 255);
+        bits -= 8;
+      }
+    }
+    return new Uint8Array(out);
+  }
+
+  /**
+   * 解析使用者貼進來的東西：otpauth://totp/... 連結，或一串裸金鑰。
+   * 回傳 { secret, name, digits, period, algo } 或 { error }。
+   */
+  function totpParse(text) {
+    var t = String(text || '').trim();
+    if (!t) return { error: '' };
+    if (/^otpauth-migration:/i.test(t)) return totpParseMigration(t);
+    if (/^otpauth:\/\/hotp\//i.test(t)) {
+      return { error: '這是計次型（HOTP）的驗證碼，這張卡片只支援依時間變化的（TOTP）' };
+    }
+    if (/^otpauth:\/\/totp\//i.test(t)) {
+      var q = t.indexOf('?');
+      var label = decodeURIComponent(t.slice('otpauth://totp/'.length, q < 0 ? undefined : q) || '');
+      var params = {};
+      (q < 0 ? '' : t.slice(q + 1)).split('&').forEach(function (kv) {
+        var i = kv.indexOf('=');
+        if (i < 0) return;
+        try { params[kv.slice(0, i).toLowerCase()] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, ' ')); }
+        catch (e) { /* 壞掉的編碼就略過那一個參數 */ }
+      });
+      var secret = totpCleanSecret(params.secret);
+      if (!secret) return { error: '連結裡沒有讀到合法的金鑰' };
+      var issuer = params.issuer || '';
+      var name = label;
+      if (issuer && name.indexOf(issuer + ':') === 0) name = name.slice(issuer.length + 1).trim();
+      var digits = Number(params.digits) || 6;
+      var period = Number(params.period) || 30;
+      var algo = String(params.algorithm || 'SHA1').toUpperCase();
+      if (digits !== 6 && digits !== 8) return { error: '驗證碼位數不是 6 或 8 位，不支援' };
+      if (!(period >= 10 && period <= 120)) return { error: '換碼週期不合理（' + period + ' 秒）' };
+      if (!TOTP_ALGOS[algo]) return { error: '不支援的演算法：' + algo };
+      return { secret: secret, name: issuer ? (name ? issuer + '（' + name + '）' : issuer) : name,
+               digits: digits, period: period, algo: algo };
+    }
+    var raw = totpCleanSecret(t);
+    if (!raw) return { error: '看起來不是金鑰（只能有英文字母 A～Z 與數字 2～7）' };
+    return { secret: raw, name: '', digits: 6, period: 30, algo: 'SHA1' };
+  }
+
+  function totpBase32Encode(bytes) {
+    var alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    var out = '', bits = 0, val = 0;
+    for (var i = 0; i < bytes.length; i++) {
+      val = (val << 8) | bytes[i];
+      bits += 8;
+      while (bits >= 5) {
+        out += alpha[(val >>> (bits - 5)) & 31];
+        bits -= 5;
+      }
+    }
+    if (bits > 0) out += alpha[(val << (5 - bits)) & 31];
+    return out;
+  }
+
+  /* ------------------------------------------------------------
+     Google Authenticator「轉移帳戶」的 QR code（otpauth-migration://offline?data=...）
+     data 是 base64 的 protobuf（MigrationPayload），格式是公開的：
+       1 otp_parameters（重複）：1 secret(bytes) 2 name 3 issuer 4 algorithm 5 digits 6 type 7 counter
+       2 version  3 batch_size  4 batch_index  5 batch_id
+     自己拆，不需要第三方函式庫。帳號多時 App 會分成好幾張，每張各自貼。
+     ------------------------------------------------------------ */
+
+  /** 最小的 protobuf 讀取器：回傳 [{ field, wire, value }]，value 是數字或 Uint8Array */
+  function pbRead(buf) {
+    var out = [], i = 0;
+    function varint() {
+      var n = 0, mul = 1, b;
+      do {
+        if (i >= buf.length) throw new Error('資料不完整');
+        b = buf[i++];
+        n += (b & 127) * mul;
+        mul *= 128;
+      } while (b & 128);
+      return n;
+    }
+    while (i < buf.length) {
+      var key = varint();
+      var field = Math.floor(key / 8), wire = key % 8;
+      if (wire === 0) out.push({ field: field, wire: 0, value: varint() });
+      else if (wire === 2) {
+        var len = varint();
+        if (i + len > buf.length) throw new Error('資料不完整');
+        out.push({ field: field, wire: 2, value: buf.subarray(i, i + len) });
+        i += len;
+      } else if (wire === 1) i += 8;
+      else if (wire === 5) i += 4;
+      else throw new Error('不認得的格式');
+    }
+    return out;
+  }
+
+  function utf8Text(bytes) {
+    try { return new TextDecoder().decode(bytes); } catch (e) { return ''; }
+  }
+
+  function totpParseMigration(uri) {
+    var bad = { error: '這張轉移 QR code 讀不出來。請在 Authenticator 重新匯出一次再試' };
+    var m = /[?&]data=([^&]*)/.exec(uri);
+    if (!m) return bad;
+    var bytes;
+    try {
+      var b64 = decodeURIComponent(m[1].replace(/\+/g, '%2B')).replace(/-/g, '+').replace(/_/g, '/').replace(/\s/g, '');
+      var bin = atob(b64);
+      bytes = new Uint8Array(bin.length);
+      for (var k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+    } catch (e) { return bad; }
+
+    var fields;
+    try { fields = pbRead(bytes); } catch (e) { return bad; }
+
+    var ALGO = { 0: 'SHA1', 1: 'SHA1', 2: 'SHA256', 3: 'SHA512' };   // 4 = MD5，不支援
+    var accounts = [], skipped = 0, batch = { index: 0, size: 1 };
+    fields.forEach(function (f) {
+      if (f.field === 3 && f.wire === 0) batch.size = f.value || 1;
+      if (f.field === 4 && f.wire === 0) batch.index = f.value || 0;
+      if (f.field !== 1 || f.wire !== 2) return;
+      var p;
+      try { p = pbRead(f.value); } catch (e) { skipped++; return; }
+      var secret = null, name = '', issuer = '', algo = 1, digits = 1, type = 2;
+      p.forEach(function (x) {
+        if (x.field === 1 && x.wire === 2) secret = x.value;
+        else if (x.field === 2 && x.wire === 2) name = utf8Text(x.value);
+        else if (x.field === 3 && x.wire === 2) issuer = utf8Text(x.value);
+        else if (x.field === 4 && x.wire === 0) algo = x.value;
+        else if (x.field === 5 && x.wire === 0) digits = x.value;
+        else if (x.field === 6 && x.wire === 0) type = x.value;
+      });
+      // 計次型（HOTP）與 MD5 不支援；金鑰空的也跳過
+      if (type === 1 || !ALGO.hasOwnProperty(algo) || !secret || !secret.length) { skipped++; return; }
+      var b32 = totpCleanSecret(totpBase32Encode(secret));
+      if (!b32) { skipped++; return; }
+      name = name.trim();
+      if (issuer && name.indexOf(issuer + ':') === 0) name = name.slice(issuer.length + 1).trim();
+      accounts.push({
+        secret: b32,
+        name: issuer ? (name ? issuer + '（' + name + '）' : issuer) : name,
+        digits: digits === 2 ? 8 : 6,
+        period: 30,
+        algo: ALGO[algo]
+      });
+    });
+    if (!accounts.length) {
+      return { error: skipped ? '這張 QR code 裡的帳號都不是這張卡片支援的類型（計次型或 MD5）' : bad.error };
+    }
+    return { multi: accounts, skipped: skipped, batch: batch };
+  }
+
+  /** 解密出來的一筆，照樣過一次白名單（資料檔可能被動過） */
+  function totpNormalizeEntry(e) {
+    e = e || {};
+    var secret = totpCleanSecret(e.secret);
+    if (!secret) return null;
+    var digits = e.digits === 8 ? 8 : 6;
+    var period = (e.period >= 10 && e.period <= 120) ? Math.round(e.period) : 30;
+    var algo = TOTP_ALGOS[e.algo] ? e.algo : 'SHA1';
+    return { id: e.id || uid(), name: typeof e.name === 'string' ? e.name : '',
+             secret: secret, digits: digits, period: period, algo: algo };
+  }
+
+  function totpCounter(nowMs, period) {
+    return Math.floor(nowMs / 1000 / (period || 30));
+  }
+
+  /** 算出第 counter 個時段的驗證碼。回傳 Promise<string>（不含空格） */
+  function totpCode(secret, counter, digits, algo) {
+    var subtle = (typeof crypto !== 'undefined' && crypto.subtle) ||
+                 (typeof window !== 'undefined' && window.crypto && window.crypto.subtle);
+    if (!subtle) return Promise.reject(new Error('沒有加密 API'));
+    var key = totpBase32Decode(secret);
+    var msg = new Uint8Array(8);
+    var c = counter;
+    for (var i = 7; i >= 0; i--) { msg[i] = c & 255; c = Math.floor(c / 256); }
+    return subtle.importKey('raw', key, { name: 'HMAC', hash: TOTP_ALGOS[algo] || 'SHA-1' }, false, ['sign'])
+      .then(function (k) { return subtle.sign('HMAC', k, msg); })
+      .then(function (sig) {
+        var h = new Uint8Array(sig);
+        var off = h[h.length - 1] & 15;
+        var bin = ((h[off] & 127) << 24) | (h[off + 1] << 16) | (h[off + 2] << 8) | h[off + 3];
+        var n = bin % Math.pow(10, digits || 6);
+        var s = String(n);
+        while (s.length < (digits || 6)) s = '0' + s;
+        return s;
+      });
   }
 
   /** 便籤項目的拖曳排序。跟常用語的 moveRow 分開，兩者的清單不同。 */
@@ -1380,7 +1609,18 @@
       tab.enc = t.enc || null;
       tab.entries = Array.isArray(t.entries) ? t.entries : [];
     }
+    if (tab.type === 'totp') {
+      // 一律加密；明文不會出現在資料檔裡，就算被塞了 entries 也不收
+      tab.encrypted = true;
+      tab.vault = t.vault || null;
+      tab.enc = t.enc || null;
+    }
     return tab;
+  }
+
+  /** 靠主密碼保護的卡片：加密的私人卡片與驗證碼卡。主密碼能不能丟、復原要重包哪些，都看它。 */
+  function isVaultTab(t) {
+    return !!t && t.encrypted === true && (t.type === 'private' || t.type === 'totp');
   }
 
   /* ---------- 查詢 ---------- */
@@ -1771,7 +2011,7 @@
     return (data.trash || []).some(function (e) {
       var list = e.kind === 'tab' ? [e.tab] : (e.tabs || []);
       return list.some(function (t) {
-        return t && t.type === 'private' && t.encrypted;
+        return isVaultTab(t);
       });
     });
   }
@@ -2218,6 +2458,13 @@
     TRASH_MAX: TRASH_MAX,
     moveNoteItem: moveNoteItem,
     moveItem: moveItem,
+    isVaultTab: isVaultTab,
+    totpParse: totpParse,
+    totpCleanSecret: totpCleanSecret,
+    totpBase32Encode: totpBase32Encode,
+    totpNormalizeEntry: totpNormalizeEntry,
+    totpCounter: totpCounter,
+    totpCode: totpCode,
     onDirty: onDirty,
     noteFieldsParse: noteFieldsParse,
     noteFieldsText: noteFieldsText,

@@ -246,18 +246,40 @@
     return { state: 'offline', msg: m || '同步失敗' };
   }
 
+  /* 伺服器時間與本機時鐘的差（毫秒，正數＝本機慢）。驗證碼卡用它提醒「時鐘不準」。
+     讀的是回應的 Date 標頭——它不在 CORS 預設公開的名單裡，Google 有沒有額外
+     公開要看實機；讀不到就一直是 null，驗證碼卡就不提醒（不會亂報）。
+     用請求送出與收到的中點當本機時間，扣掉來回的延遲。 */
+  var skewMs = null;
+
+  function noteServerTime(r, sentAt) {
+    try {
+      var d = r.headers.get('Date');
+      if (!d) return;
+      var server = Date.parse(d);
+      if (!isFinite(server)) return;
+      var mid = (sentAt + Date.now()) / 2;
+      // Date 標頭只到秒，所以誤差本來就有 1 秒上下
+      skewMs = server + 500 - mid;
+    } catch (e) { /* 讀不到就算了 */ }
+  }
+
+  function clockSkew() { return skewMs; }
+
   function api(url, opt) {
     opt = opt || {};
     return getToken(false).then(function (tk) {
       if (!tk) throw new Error('需要重新登入');
       var headers = opt.headers || {};
       headers.Authorization = 'Bearer ' + tk;
+      var sentAt = Date.now();
       return fetch(url, {
         method: opt.method || 'GET',
         headers: headers,
         body: opt.body,
         keepalive: !!opt.keepalive
       }).then(function (r) {
+        noteServerTime(r, sentAt);
         if (r.status === 401) { token = ''; tokenExp = 0; throw new Error('授權過期，請重新登入'); }
         if (!r.ok) throw new Error('Drive 回應 ' + r.status);
         return opt.text ? r.text() : r.json();
@@ -547,6 +569,7 @@
   window.Drive = {
     CLIENT_ID: CLIENT_ID,
     init: init,
+    clockSkew: clockSkew,
     status: status,
     signIn: signIn,
     signOut: signOut,

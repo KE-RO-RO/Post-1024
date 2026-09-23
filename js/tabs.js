@@ -22,7 +22,8 @@
     codegen: '編碼',
     form: '表單',
     table: '表格',
-    private: '私人'
+    private: '私人',
+    totp: 'TOTP'
   };
 
   /* ---------- 就地編輯（非常用語類型使用） ---------- */
@@ -273,15 +274,32 @@
       head.appendChild(dueDot);
     }
 
-    /* 「立即隱藏」留在標題列，不收進選單。那是安全動作，要一眼看到、
+    /* ⦿「鎖定」留在標題列，不收進選單。那是安全動作，要一眼看到、
        一下按到，藏起來等於變慢（規格書 9.7 的低調原則不包含拖慢保護動作）。 */
-    if (tab.type === 'private' && tab.encrypted && Vault.isCardUnlocked(tab.id)) {
-      head.appendChild(iconBtn('⦿', '立即隱藏內容', function () {
+    if (DB.isVaultTab(tab) && Vault.isCardUnlocked(tab.id)) {
+      /* TOTP 卡另外一顆眼睛：只是把數字遮起來／露出來，不用密碼（v4.26，使用者要的）。
+         跟 ⦿「鎖定」分成兩顆——一個是暫時不給旁人看，一個是真的鎖上要密碼（11.1）。
+         以前是小視窗一失焦就自動遮，但他工作時一直在別的視窗輸入驗證碼，改成手動 */
+      if (tab.type === 'totp') {
+        var hid = !!tpHidden[tab.id];
+        head.appendChild(svgIconBtn(hid ? EYE_OFF_SVG : EYE_SVG, hid ? '顯示' : '隱藏', function () {
+          if (tpHidden[tab.id]) delete tpHidden[tab.id];
+          else tpHidden[tab.id] = true;
+          DB.touch();   // 同私人卡片展開收合的做法：重畫主視窗，小視窗跟著重畫
+        }, 'pip-ok tp-eye' + (hid ? ' on' : '')));
+      }
+      head.appendChild(svgIconBtn(LOCK_SVG, '鎖定', function () {
         ctx.lockCard(tab);
       }, 'pip-ok'));
     }
 
-    if (!RO) {
+    /* 私人卡片、TOTP 卡的主畫面標題列精簡（v4.27，使用者要的）：外面只留眼睛、⦿ 鎖定、⋯，
+       彈出、顏色、釘選、收合都收進 ⋯ 選單。這兩種卡的標題列多了保護鈕，
+       全擺出來會把標題擠到看不見。上鎖、解鎖都一樣收，外觀不跳來跳去。
+       小視窗（RO）本來就沒有這些鈕，不受影響。 */
+    var slim = isSlimHead(tab);
+
+    if (!RO && !slim) {
       // 彈出置頂小視窗。這個瀏覽器不支援時不常駐一顆停用的按鈕，
       // 改成在 ⋯ 選單裡標示原因（見 cardMenuItems）
       if (ctx.pipSupported()) {
@@ -306,7 +324,8 @@
       head.appendChild(dot);
 
       /* ★ 一定要留在標題列：釘選狀態就是靠實心 ★ 表示的（規格書 7.2），
-         收進選單之後就看不出哪幾張被釘了 */
+         收進選單之後就看不出哪幾張被釘了。私人／TOTP 卡是例外（上面的 slim），
+         使用者知道並接受：釘選的仍排最前面，⋯ 選單裡寫「取消釘選」 */
       head.appendChild(iconBtn(tab.pinned ? '★' : '☆',
         tab.pinned ? '取消釘選' : '釘選（固定在最上面）',
         function () { ctx.togglePin(tab); },
@@ -319,8 +338,10 @@
         collapsed ? '展開這張卡片' : '收合成一條',
         function () { DB.toggleCollapse(tab.id); },
         'collapse-btn'));
+    }
 
-      head.appendChild(iconBtn('⋯', '更多', function () {
+    if (!RO) {
+      head.appendChild(svgIconBtn(MORE_SVG, '更多', function () {
         ctx.openCardMenu(tab, cardMenuItems(tab, ctx));
       }, 'more-btn'));
     }
@@ -342,8 +363,43 @@
    * 卡片 ⋯ 選單的內容。哪些動作收進來、哪些留在標題列，見 renderCard 的註解。
    * 只回傳資料，實際的彈窗由 app.js 畫——這樣選單的樣子跟分類的 ⋯ 一致。
    */
+  function isSlimHead(tab) {
+    return tab.type === 'private' || tab.type === 'totp';
+  }
+
   function cardMenuItems(tab, ctx) {
     var items = [];
+
+    /* 精簡標題列收進來的四項排最上面，順序照原本標題列由左到右 */
+    if (isSlimHead(tab)) {
+      if (ctx.pipSupported()) {
+        var pm = ctx.pipMode ? ctx.pipMode() : null;
+        items.push({
+          text: !ctx.isPipped(tab) ? '彈出成置頂小視窗'
+            : (pm === 'win' ? '改成置頂小視窗' : '關掉置頂小視窗'),
+          onClick: function () { ctx.togglePip(tab); }
+        });
+      }
+      items.push({
+        text: '卡片顏色',
+        onClick: function () {
+          /* 等這次點擊冒泡完再開：document 上的「點外面就收色票」會把剛開的關掉。
+             色票貼在這張卡片的 ⋯ 下面（原本的色點已經不在標題列了） */
+          setTimeout(function () {
+            var more = document.querySelector('#cardGrid .card[data-tab-id="' + tab.id + '"] .more-btn');
+            if (more) ctx.pickTabColor(tab, more);
+          }, 0);
+        }
+      });
+      items.push({
+        text: tab.pinned ? '取消釘選' : '釘選（固定在最上面）',
+        onClick: function () { ctx.togglePin(tab); }
+      });
+      items.push({
+        text: tab.collapsed ? '展開這張卡片' : '收合成一條',
+        onClick: function () { DB.toggleCollapse(tab.id); }
+      });
+    }
 
     if (!ctx.pipSupported()) {
       items.push({
@@ -407,7 +463,7 @@
       danger: true,
       onClick: function () {
         var msg = '將刪除「' + (tab.title || '未命名') + '」這張卡片及其全部內容。';
-        if (tab.type === 'private') {
+        if (tab.type === 'private' || tab.type === 'totp') {
           // 卡片會先進保留區，所以確認訊息講的是還原，不是無法復原
           ctx.confirmDeletePrivate(tab, '刪除卡片', msg,
             function () { DB.deleteTab(tab.id); }, true);
@@ -1321,6 +1377,19 @@
     '<rect x="9" y="9" width="11" height="11" rx="1.8"/>' +
     '<path d="M15 6.6V5.6A1.6 1.6 0 0 0 13.4 4H5.6A1.6 1.6 0 0 0 4 5.6v7.8A1.6 1.6 0 0 0 5.6 15h1"/></svg>';
 
+  /* 眼睛：TOTP 卡的「隱藏／顯示」。自繪（11.5） */
+  var EYE_SVG =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/>' +
+    '<circle cx="12" cy="12" r="2.8"/></svg>';
+  var EYE_OFF_SVG =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M10.6 6.2A9 9 0 0 1 12 6c5 0 9 6 9 6a15 15 0 0 1-2.3 2.8"/>' +
+    '<path d="M6.6 6.6A15 15 0 0 0 3 12s4 6 9 6a9 9 0 0 0 4.2-1"/>' +
+    '<path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3 3l18 18"/></svg>';
+
   var LINK_SVG =
     '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
     'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
@@ -1329,6 +1398,16 @@
 
   /* 自繪 SVG：⧉ 這類字元在不同字型下大小與垂直位置差很多（規格書 11.5）。
      外框代表原本的視窗，右下角的小框是彈出去、浮在最上層的那一個 */
+  /* ⦿ 與 ⋯ 改成自繪（v4.27）：用字的話各字型畫的高度不同，Windows 上 ⋯ 明顯比眼睛低
+     （使用者截圖）。圖形照舊是圈中一點、三個點，大小跟眼睛一樣 14px */
+  var LOCK_SVG =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
+    'stroke="currentColor" stroke-width="1.8">' +
+    '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/></svg>';
+  var MORE_SVG =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">' +
+    '<circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
+
   var PIP_SVG =
     '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
     'stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">' +
@@ -1347,6 +1426,32 @@
     return b;
   }
 
+  /** 鎖著的加密卡片（私人、驗證碼共用）：只有一個眼睛劃線圖示與「輸入主密碼」 */
+  function renderLocked(tab, body, ctx) {
+    // 鎖定就忘掉這張卡片的展開狀態，下次進來一律從全摺疊開始
+    forgetOpen(tab.id);
+    var locked = document.createElement('div');
+    locked.className = 'locked-body';
+    // 刻意不顯示筆數，也不用鎖頭圖示——那些跟「密碼」兩個字一樣顯眼
+    locked.innerHTML =
+      '<div class="locked-icon">' +
+      '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" ' +
+      'stroke="currentColor" stroke-width="1.6" stroke-linecap="round">' +
+      '<path d="M10.6 6.2A9 9 0 0 1 12 6c5 0 9 6 9 6a15 15 0 0 1-2.3 2.8"/>' +
+      '<path d="M6.6 6.6A15 15 0 0 0 3 12s4 6 9 6a9 9 0 0 0 4.2-1"/>' +
+      '<path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>' +
+      '<path d="M3 3l18 18"/></svg></div>' +
+      '<p class="locked-text">已鎖定</p>';
+
+    var btn = document.createElement('button');
+    btn.className = 'btn-primary';
+    btn.textContent = '輸入主密碼';
+    btn.addEventListener('click', function () { ctx.openCard(tab); });
+    locked.appendChild(btn);
+
+    body.appendChild(locked);
+  }
+
   function renderPrivate(tab, body, ctx) {
     if (tab.encrypted && !Vault.available()) {
       var warn = document.createElement('div');
@@ -1358,28 +1463,7 @@
     }
 
     if (tab.encrypted && !Vault.isCardUnlocked(tab.id)) {
-      // 鎖定就忘掉這張卡片的展開狀態，下次進來一律從全摺疊開始
-      forgetOpen(tab.id);
-      var locked = document.createElement('div');
-      locked.className = 'locked-body';
-      // 刻意不顯示筆數，也不用鎖頭圖示——那些跟「密碼」兩個字一樣顯眼
-      locked.innerHTML =
-        '<div class="locked-icon">' +
-        '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" ' +
-        'stroke="currentColor" stroke-width="1.6" stroke-linecap="round">' +
-        '<path d="M10.6 6.2A9 9 0 0 1 12 6c5 0 9 6 9 6a15 15 0 0 1-2.3 2.8"/>' +
-        '<path d="M6.6 6.6A15 15 0 0 0 3 12s4 6 9 6a9 9 0 0 0 4.2-1"/>' +
-        '<path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>' +
-        '<path d="M3 3l18 18"/></svg></div>' +
-        '<p class="locked-text">內容已隱藏</p>';
-
-      var btn = document.createElement('button');
-      btn.className = 'btn-primary';
-      btn.textContent = '輸入主密碼';
-      btn.addEventListener('click', function () { ctx.openCard(tab); });
-      locked.appendChild(btn);
-
-      body.appendChild(locked);
+      renderLocked(tab, body, ctx);
       return;
     }
 
@@ -2133,6 +2217,221 @@
     body.appendChild(p);
   }
 
+  /* ============================================================
+     驗證碼卡（totp，v4.26）
+     ------------------------------------------------------------
+     一張卡片放好幾個帳號（像 Authenticator），外觀是使用者看過三案截圖後
+     選的 B 案「兩行式」：名稱小字在上、6 位數放大在下，倒數圓環在左。
+
+     - 一律加密，跟加密的私人卡片同一組主密碼、同一套解鎖與自動上鎖
+     - 金鑰永遠不顯示、不能複製、不參與搜尋；點 6 位數複製的是驗證碼
+     - 剩 5 秒內數字與圓環轉紅，提醒快換了（不顯示下一組，使用者 9/23 說不要）
+     - 數字每秒更新靠一個共用的計時器，**只在畫面上有解開的驗證碼卡時才跑**
+       （11.28），而且只改文字與圓環，不重畫卡片（11.20）
+     ============================================================ */
+
+  var tpHidden = {};       // 按眼睛遮起來的卡片（只在記憶體；鎖上時清掉）
+  var tpLive = [];         // 畫面上正在跑的列：{ tabId, entry, row, codeEl, ringEl }
+  var tpTimer = null;
+  var tpCache = {};        // 'entryId:counter' → 驗證碼，同一個 30 秒內不重算
+  var TP_SOON = 5;         // 剩幾秒算「快過期」
+  var TP_RING_C = 2 * Math.PI * 8;
+
+  function tpRingSvg() {
+    return '<svg class="tp-ring" viewBox="0 0 22 22" aria-hidden="true">' +
+      '<circle class="bg" cx="11" cy="11" r="8"/>' +
+      '<circle class="fg" cx="11" cy="11" r="8" stroke-dasharray="0 ' + TP_RING_C.toFixed(1) + '"/></svg>';
+  }
+
+  function tpFmt(code) {
+    if (!code) return '';
+    var h = Math.ceil(code.length / 2);
+    return code.slice(0, h) + ' ' + code.slice(h);
+  }
+
+  function tpGet(entry, counter) {
+    var k = entry.id + ':' + counter;
+    if (tpCache[k]) return Promise.resolve(tpCache[k]);
+    return DB.totpCode(entry.secret, counter, entry.digits, entry.algo).then(function (c) {
+      tpCache[k] = c;
+      return c;
+    });
+  }
+
+  /** 更新一列：數字、圓環、快過期的紅色。不重建元素。 */
+  function tpPaint(live, now) {
+    var e = live.entry;
+    var period = e.period || 30;
+    var counter = DB.totpCounter(now, period);
+    var left = period - Math.floor(now / 1000) % period;
+    var soon = left <= TP_SOON;
+    var hidden = !!tpHidden[live.tabId];
+
+    var fg = live.ringEl && live.ringEl.querySelector('.fg');
+    if (fg) fg.setAttribute('stroke-dasharray', (TP_RING_C * left / period).toFixed(1) + ' ' + TP_RING_C.toFixed(1));
+    if (live.ringEl) live.ringEl.classList.toggle('warn', soon);
+    live.row.title = '還有 ' + left + ' 秒換下一組';
+
+    if (hidden) {
+      live.codeEl.textContent = '••• •••';
+      live.codeEl.classList.remove('warn');
+      return;
+    }
+    tpGet(e, counter).then(function (c) {
+      live.code = c;
+      live.codeEl.textContent = tpFmt(c);
+      live.codeEl.classList.toggle('warn', soon);
+    });
+  }
+
+  function tpTick() {
+    // 已經不在畫面上的（重畫掉、小視窗關了、卡片鎖了）一律丟掉
+    tpLive = tpLive.filter(function (l) { return l.row.isConnected && Vault.isCardUnlocked(l.tabId); });
+    if (!tpLive.length) { clearInterval(tpTimer); tpTimer = null; return; }
+    var now = Date.now();
+    tpLive.forEach(function (l) { tpPaint(l, now); });
+  }
+
+  function tpEnsureTimer() {
+    if (tpTimer) return;
+    tpTimer = setInterval(tpTick, 1000);
+  }
+
+  function renderTotp(tab, body, ctx) {
+    if (!Vault.available()) {
+      var warn = document.createElement('div');
+      warn.className = 'row-hint';
+      warn.innerHTML = '這個環境不支援加密，這張卡片無法使用。<br>' +
+        '請改用較新的瀏覽器，或用 https 開頭的網址開啟。';
+      body.appendChild(warn);
+      return;
+    }
+    if (!Vault.isCardUnlocked(tab.id)) {
+      renderLocked(tab, body, ctx);
+      delete tpHidden[tab.id];   // 解鎖之後從「看得到」開始
+      return;
+    }
+
+    var entries = ctx.privateEntries(tab);
+    if (!entries) {
+      var loading = document.createElement('div');
+      loading.className = 'row-hint';
+      loading.textContent = '讀取中…';
+      body.appendChild(loading);
+      Vault.decryptFor(tab.id, tab.enc).then(function (list) {
+        // 解出來的東西照樣過白名單：資料檔可能被動過
+        var clean = (list || []).map(DB.totpNormalizeEntry).filter(Boolean);
+        Vault.setPlain(tab.id, clean);
+        DB.touch();
+      }, function () {
+        Vault.setPlain(tab.id, []);
+        Clip.toast('這張卡片的內容解不開', true);
+        DB.touch();
+      });
+      return;
+    }
+
+    // 時鐘偏差：有辦法量到（登入雲端、而且讀得到伺服器時間）才提醒
+    var skew = ctx.clockSkew ? ctx.clockSkew() : null;
+    if (skew !== null && Math.abs(skew) > 10000) {
+      var cw = document.createElement('div');
+      cw.className = 'tp-clock';
+      cw.textContent = '這台電腦的時鐘' + (skew > 0 ? '慢' : '快') + '了 ' +
+        Math.round(Math.abs(skew) / 1000) + ' 秒，驗證碼可能對不上。請校正系統時間';
+      body.appendChild(cw);
+    }
+
+    if (!entries.length) {
+      var hint = document.createElement('div');
+      hint.className = 'row-hint';
+      hint.textContent = '還沒有帳號';
+      body.appendChild(hint);
+    }
+
+    entries.forEach(function (entry) {
+      var row = document.createElement('div');
+      row.className = 'tp-row';
+
+      var grip;
+      if (!RO) {
+        grip = listGrip(row);
+        ctx.attachItemDrag(row, tab, entry.id, 'tp', function (from, to) {
+          ctx.movePrivate(tab, from, to);
+        });
+      } else {
+        grip = document.createElement('span');   // 格子留著（11.24）
+        grip.className = 'li-grip';
+      }
+      row.appendChild(grip);
+
+      var ringWrap = document.createElement('span');
+      ringWrap.className = 'tp-ring-wrap';
+      ringWrap.innerHTML = tpRingSvg();
+      row.appendChild(ringWrap);
+
+      var name = document.createElement('span');
+      name.className = 'tp-name';
+      setText(name, entry.name, '未命名');
+      name.title = entry.name || '';
+      row.appendChild(name);
+
+      var line = document.createElement('span');
+      line.className = 'tp-line';
+      var code = document.createElement('span');
+      code.className = 'tp-code';
+      code.title = '點一下複製';
+      line.appendChild(code);
+      row.appendChild(line);
+
+      var acts = document.createElement('span');
+      acts.className = 'tp-acts';
+      if (!RO) {
+        acts.appendChild(iconBtn('✎', '改名稱', function () { ctx.editTotp(tab, entry); }));
+        acts.appendChild(iconBtn('✕', '刪除這個帳號', function () {
+          ctx.confirmDeletePrivate(tab, '刪除帳號',
+            '將刪除「' + (entry.name || '未命名') + '」這個帳號的驗證碼。' +
+            '<br>手機上的 Authenticator 不受影響，但這裡的金鑰會一起消失。', function () {
+              var list = (ctx.privateEntries(tab) || []).filter(function (x) { return x.id !== entry.id; });
+              ctx.setPrivateEntries(tab, list);
+              ctx.savePrivate(tab);
+            });
+        }, 'danger-btn'));
+      }
+      row.appendChild(acts);
+
+      var live = { tabId: tab.id, entry: entry, row: row, codeEl: code,
+                   ringEl: ringWrap.querySelector('.tp-ring') };
+      code.addEventListener('click', function (e) {
+        e.stopPropagation();
+        // 遮起來的時候，點數字是「再露出來」，不是複製（跟按眼睛一樣）
+        if (tpHidden[tab.id]) {
+          delete tpHidden[tab.id];
+          DB.touch();
+          return;
+        }
+        if (live.code) Clip.copy(live.code, code, entry.name || '驗證碼');
+      });
+
+      body.appendChild(row);
+      tpLive.push(live);
+      tpPaint(live, Date.now());
+    });
+
+    if (entries.length) {
+      var tip = document.createElement('div');
+      tip.className = 'tp-hint';
+      tip.textContent = tpHidden[tab.id] ? '點數字就會重新顯示' : '點數字就複製';
+      body.appendChild(tip);
+      tpEnsureTimer();
+    }
+
+    var add = document.createElement('button');
+    add.className = 'row-add';
+    add.textContent = '＋ 新增帳號';
+    add.addEventListener('click', function () { ctx.editTotp(tab, null); });
+    body.appendChild(add);
+  }
+
   var RENDERERS = {
     note: renderNote,
     quickphrase: renderQuickPhrase,
@@ -2141,7 +2440,8 @@
     link: renderLink,
     codegen: renderCodegen,
     form: renderForm,
-    private: renderPrivate
+    private: renderPrivate,
+    totp: renderTotp
   };
 
   window.Tabs = {

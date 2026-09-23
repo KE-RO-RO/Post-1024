@@ -859,6 +859,19 @@
      ============================================================ */
 
   var AUTO_LOCK_MINUTES = 10;   // 解鎖後固定 10 分鐘就鎖，不因操作重置
+
+  /* TOTP 卡不自動上鎖（使用者 9/23：工作上一直要用到驗證碼，10 分鐘一鎖很麻煩）。
+     只有兩種情況會鎖：按標題列的 ⦿ 手動鎖、登出（登出會清掉記憶體裡所有金鑰）。
+     重新整理或關掉分頁也會回到鎖住——金鑰只放在記憶體，這是加密的前提，沒辦法例外。
+     私人卡片維持 10 分鐘。 */
+  function lockMinutesFor(tab) {
+    return tab && tab.type === 'totp' ? 0 : AUTO_LOCK_MINUTES;
+  }
+
+  function unlockedToast(tab, doc) {
+    var m = lockMinutesFor(tab);
+    Clip.toast(m ? '已解鎖，' + m + ' 分鐘後自動鎖定' : '已解鎖，按 ⦿ 或登出才會再鎖上', false, doc);
+  }
   // 搜尋去抖：停手這麼久之後才真的搜。太短沒效果，太長會像沒反應
   var SEARCH_DELAY = 150;
 
@@ -981,6 +994,213 @@
     });
     // showModal 會把焦點給第一個輸入框；那可能是藏起來的那一格
     (kind === 'form' ? title : content).focus();
+  }
+
+  /* ============================================================
+     驗證碼卡（v4.26）
+     ------------------------------------------------------------
+     一律加密，用跟私人卡片同一組主密碼（使用者選的）。建立卡片之後直接走
+     openCard：還沒有主密碼就先建主密碼，有的話幫這張卡片建自己的金鑰包裹。
+     ============================================================ */
+  function addTotpCard() {
+    if (!Vault.available()) { openCard({ vault: null }, null); return; }
+    promptModal('新增TOTP', '卡片標題', 'TOTP', function (title) {
+      var tab = DB.addTab('totp', state.currentCategoryId, title);
+      DB.touch();
+      openCard(tab, null);
+    });
+  }
+
+  /* QR 解碼函式庫（js/jsqr.js，Apache-2.0）放在自己的儲存庫，
+     跟簡繁字典同一個做法：不走 CDN，第一次貼截圖時才載入。 */
+  var qrLoad = null;
+  function loadJsQR() {
+    if (window.jsQR) return Promise.resolve(window.jsQR);
+    if (qrLoad) return qrLoad;
+    qrLoad = new Promise(function (ok, fail) {
+      var el = document.createElement('script');
+      el.src = 'js/jsqr.js';
+      el.onload = function () { window.jsQR ? ok(window.jsQR) : fail(new Error('載入失敗')); };
+      el.onerror = function () { qrLoad = null; fail(new Error('載入失敗')); };
+      document.head.appendChild(el);
+    });
+    return qrLoad;
+  }
+
+  /** 從圖片檔讀出 QR code 裡的文字。讀不到回傳 '' */
+  function readQrFromFile(file) {
+    return loadJsQR().then(function (jsQR) {
+      return createImageBitmap(file).then(function (bmp) {
+        // 太大的截圖先縮到 1600 以內，解碼快很多，QR 也還夠清楚
+        var scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+        var w = Math.max(1, Math.round(bmp.width * scale));
+        var h = Math.max(1, Math.round(bmp.height * scale));
+        var cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        var g = cv.getContext('2d');
+        g.drawImage(bmp, 0, 0, w, h);
+        var img = g.getImageData(0, 0, w, h);
+        var r = jsQR(img.data, w, h, { inversionAttempts: 'attemptBoth' });
+        return r && r.data ? r.data : '';
+      });
+    });
+  }
+
+  /**
+   * 新增帳號（item 為 null）或改名稱。
+   * 金鑰只在新增時出現；改的時候只能改名稱——金鑰永遠不再顯示。
+   */
+  function editTotp(tab, item) {
+    var isNew = !item;
+    var wrap = document.createElement('div');
+    var name = labeledInput(wrap, '名稱', 'text', item ? item.name : '', '方便你辨認的名稱');
+    var nameLabel = name.previousSibling;
+    var parsed = null;
+
+    if (isNew) {
+      var kl = document.createElement('label');
+      kl.textContent = '金鑰';
+      wrap.appendChild(kl);
+
+      var zone = document.createElement('div');
+      zone.className = 'tp-paste';
+      zone.tabIndex = 0;
+      zone.innerHTML = '在這裡按 <b>Ctrl + V</b> 貼上 QR code 的截圖<br>' +
+        '<span>或把「無法掃描時手動輸入」的那串金鑰、otpauth:// 開頭的連結貼在下面</span>';
+      wrap.appendChild(zone);
+
+      var key = document.createElement('input');
+      key.type = 'text';
+      key.className = 'tp-key';
+      key.placeholder = '金鑰或 otpauth:// 連結';
+      key.autocomplete = 'off';
+      key.spellcheck = false;
+      key.addEventListener('keydown', function (e) { e.stopPropagation(); });
+      wrap.appendChild(key);
+
+      var status = document.createElement('div');
+      status.className = 'field-hint tp-status';
+      wrap.appendChild(status);
+
+      var check = function () {
+        parsed = null;
+        status.classList.remove('ok', 'bad');
+        var v = key.value.trim();
+        if (!v) { status.textContent = ''; return; }
+        var r = DB.totpParse(v);
+        if (r.error) {
+          status.textContent = r.error;
+          status.classList.add('bad');
+          return;
+        }
+        parsed = r;
+        status.classList.add('ok');
+        if (r.multi) {
+          /* Authenticator 的轉移 QR：一次好幾個帳號，全部直接加（使用者選的）。
+             名稱照 Authenticator 裡的，名稱欄用不到就藏起來 */
+          var names = r.multi.map(function (a) { return a.name || '未命名'; });
+          status.textContent = '✓ 讀到 ' + r.multi.length + ' 個帳號：' + names.join('、') +
+            (r.batch && r.batch.size > 1 ? '（這是第 ' + (r.batch.index + 1) + '／' + r.batch.size +
+              ' 張，其他張存完再各自貼）' : '') +
+            (r.skipped ? '。另有 ' + r.skipped + ' 個不支援的類型略過' : '');
+          nameLabel.hidden = true;
+          name.hidden = true;
+          return;
+        }
+        nameLabel.hidden = false;
+        name.hidden = false;
+        status.textContent = '✓ 已讀到金鑰：' + r.digits + ' 位數、每 ' + r.period + ' 秒換一次' +
+          (r.algo !== 'SHA1' ? '（' + r.algo + '）' : '');
+        if (!name.value.trim() && r.name) name.value = r.name;
+      };
+      key.addEventListener('input', check);
+
+      // 貼圖：整個彈窗都收（焦點在哪一格都行），有圖片就解 QR
+      wrap.addEventListener('paste', function (e) {
+        var items = (e.clipboardData && e.clipboardData.items) || [];
+        var file = null;
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].kind === 'file' && /^image\//.test(items[i].type)) { file = items[i].getAsFile(); break; }
+        }
+        if (!file) {
+          // 純文字貼在貼圖框上：當成金鑰
+          if (e.target === zone) {
+            var t = e.clipboardData.getData('text');
+            if (t) { e.preventDefault(); key.value = t.trim(); check(); }
+          }
+          return;
+        }
+        e.preventDefault();
+        status.classList.remove('ok', 'bad');
+        status.textContent = '讀取 QR code 中…';
+        readQrFromFile(file).then(function (text) {
+          if (!text) {
+            status.textContent = '這張圖裡找不到 QR code。截圖時把 QR code 截完整一點再試一次，或改貼金鑰';
+            status.classList.add('bad');
+            return;
+          }
+          key.value = text;
+          check();
+        }, function () {
+          status.textContent = '沒辦法讀取圖片或載入 QR 解碼程式，請改貼金鑰';
+          status.classList.add('bad');
+        });
+      });
+    }
+
+    function save() {
+      var nm = name.value.trim();
+      var list = (privateEntries(tab) || []).slice();
+      if (!isNew) {
+        list = list.map(function (x) {
+          if (x.id !== item.id) return x;
+          var y = {}; Object.keys(x).forEach(function (k) { y[k] = x[k]; });
+          y.name = nm;
+          return y;
+        });
+      } else {
+        if (!parsed) { Clip.toast('還沒有讀到金鑰', true); key.focus(); return; }
+        // 同一把金鑰已經在卡片裡就跳過，不重複加
+        var have = {};
+        list.forEach(function (x) { have[x.secret] = true; });
+        var incoming = parsed.multi || [{ secret: parsed.secret, name: nm || parsed.name,
+          digits: parsed.digits, period: parsed.period, algo: parsed.algo }];
+        var added = 0, dup = 0;
+        incoming.forEach(function (a) {
+          var entry = DB.totpNormalizeEntry({ id: DB.uid(), name: a.name || '未命名', secret: a.secret,
+            digits: a.digits, period: a.period, algo: a.algo });
+          if (!entry) return;
+          if (have[entry.secret]) { dup++; return; }
+          have[entry.secret] = true;
+          list.push(entry);
+          added++;
+        });
+        if (!added) {
+          Clip.toast(dup ? '這' + (incoming.length > 1 ? '些' : '個') + '帳號已經在卡片裡了' : '金鑰不合法', true);
+          return;
+        }
+        if (parsed.multi || dup) {
+          Clip.toast('已加入 ' + added + ' 個帳號' + (dup ? '（' + dup + ' 個已經在卡片裡，略過）' : ''));
+        }
+      }
+      setPrivateEntries(tab, list);
+      closeModal();
+      savePrivate(tab);
+    }
+
+    name.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); if (isNew) key.focus(); else save(); }
+    });
+
+    showModal({
+      title: isNew ? '新增帳號' : '改名稱',
+      body: wrap,
+      noEscape: true,
+      buttons: [
+        { text: '取消', onClick: closeModal },
+        { text: '儲存', cls: 'btn-primary', onClick: save }
+      ]
+    });
   }
 
   function labeledInput(wrap, labelText, type, value, placeholder) {
@@ -1129,7 +1349,7 @@
 
       var pw = p1.value;
       Vault.setupMaster(pw).then(function (recovery) {
-        return Vault.createCard(tab.id, pw, AUTO_LOCK_MINUTES).then(function (v) {
+        return Vault.createCard(tab.id, pw, lockMinutesFor(tab)).then(function (v) {
           tab.vault = v;
           Vault.setPlain(tab.id, []);
           DB.touch();
@@ -1241,9 +1461,9 @@
 
     function go() {
       err.hidden = true;
-      Vault.unlockCard(tab.id, tab.vault, pw.value, AUTO_LOCK_MINUTES).then(function () {
+      Vault.unlockCard(tab.id, tab.vault, pw.value, lockMinutesFor(tab)).then(function () {
         closeModal();
-        Clip.toast('已解鎖，' + AUTO_LOCK_MINUTES + ' 分鐘後自動隱藏');
+        unlockedToast(tab);
         render();
         if (onDone) onDone();
       }, function () {
@@ -1295,12 +1515,12 @@
          換密碼要重新包裹主金鑰與「每一張」加密卡片的密碼包裹，
          所以要先把全部卡片撈出來交給 vault 層。 */
       var cards = DB.raw().tabs.filter(function (t) {
-        return t.type === 'private' && t.encrypted && t.vault;
+        return DB.isVaultTab(t) && t.vault;
       }).map(function (t) { return { id: t.id, vault: t.vault }; });
 
       /* 每張卡片的 pwd 包裹是用「主密碼」包的，不是用復原金鑰包的，
          所以重設時要走主金鑰那條路重新包裹，不能拿金鑰去解卡片包裹。 */
-      Vault.unlockCard(tab.id, tab.vault, key.value, AUTO_LOCK_MINUTES).then(function () {
+      Vault.unlockCard(tab.id, tab.vault, key.value, lockMinutesFor(tab)).then(function () {
         return Vault.resetPassword(key.value, p1.value, cards);
       }).then(function (out) {
         DB.raw().vault.pwd = out.master;
@@ -1344,7 +1564,7 @@
 
   function lockCard(tab) {
     Vault.lockCard(tab.id);
-    Clip.toast('內容已隱藏');
+    Clip.toast('已鎖定');
     render();
   }
 
@@ -1368,7 +1588,7 @@
 
     function go() {
       err.hidden = true;
-      Vault.createCard(tab.id, pw.value, AUTO_LOCK_MINUTES).then(function (v) {
+      Vault.createCard(tab.id, pw.value, lockMinutesFor(tab)).then(function (v) {
         tab.vault = v;
         if (!Vault.getPlain(tab.id)) Vault.setPlain(tab.id, []);
         DB.touch();
@@ -2215,6 +2435,9 @@
       attachDrag: attachCardDrag,
       attachRowDrag: attachRowDrag,
       attachNoteDrag: attachNoteDrag,
+      // 驗證碼卡：新增帳號／改名稱；時鐘偏差（讀不到就是 null）
+      editTotp: editTotp,
+      clockSkew: Drive.clockSkew,
       // 待辦、倒數、私人卡片的每一筆（v4.24）
       attachItemDrag: attachItemDrag,
       movePrivate: movePrivate,
@@ -2578,6 +2801,7 @@
     countdown: ['倒數提醒', '顯示距離某天還有幾天'],
     link: ['連結收藏', '常用網址清單'],
     private: ['私人', '加密保存，需要主密碼才看得到'],
+    totp: ['TOTP', '跟手機 Authenticator 一樣的 6 位數，需要主密碼'],
     codegen: ['編碼', '選好選項產生一段文案與一組隨機碼'],
     form: ['表單', '填幾個欄位，照你的格式產生一段可以複製的文字'],
     table: ['表格／參考清單', '（尚未實作）']
@@ -2621,6 +2845,7 @@
         b.addEventListener('click', function () {
           closeModal();
           if (type === 'private') { askPrivateMode(); return; }
+          if (type === 'totp') { addTotpCard(); return; }
           promptModal('新增' + t[0], '卡片標題', t[0], function (title) {
             DB.addTab(type, state.currentCategoryId, title);
           });
@@ -3418,7 +3643,7 @@
       /* 只有存在「加密」卡片才需要驗身分。全部都是不加密卡片時
          匯出完全不會被打斷——分享給別人的人多半是這種情況。 */
       var locked = DB.raw().tabs.filter(function (t) {
-        return t.type === 'private' && t.encrypted && t.vault && !Vault.isCardUnlocked(t.id);
+        return DB.isVaultTab(t) && t.vault && !Vault.isCardUnlocked(t.id);
       });
       var doExport = function () {
         DB.saveNow();
@@ -3502,7 +3727,10 @@
       openLinks: openLinks,
       lockCard: lockCard,
       privateEntries: privateEntries,
+      clockSkew: Drive.clockSkew,
       autoLockMinutes: AUTO_LOCK_MINUTES,
+      lockMinutesFor: lockMinutesFor,
+      unlockedToast: unlockedToast,
       onChange: render
     });
     DB.onChange(render);
@@ -3551,7 +3779,7 @@
 
     // 每張卡片各自計時，所以這個回呼會帶著是哪一張到期
     Vault.onLock(function () {
-      Clip.toast('已超過 ' + AUTO_LOCK_MINUTES + ' 分鐘，內容自動隱藏');
+      Clip.toast('已超過 ' + AUTO_LOCK_MINUTES + ' 分鐘，已自動鎖定');
       render();
     });
 
