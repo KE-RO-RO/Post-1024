@@ -1,9 +1,14 @@
 /* ============================================================
-   data.js — 資料模型、localStorage 讀寫、匯出／匯入
+   data.js — 資料模型、分頁暫存讀寫、匯出／匯入
    ------------------------------------------------------------
    刻意不用 ES module（沒有 type="module"），因為這樣直接用檔案
    總管點兩下 index.html 也能開起來測試；ES module 在 file:// 底下
    會被 CORS 擋掉。全部掛在 window.DB 這個命名空間下。
+
+   **資料放在分頁暫存（sessionStorage），不是 localStorage。**
+   同一個分頁重新整理資料還在、斷線也在，但**關掉那個分頁（或視窗）就清掉**，
+   登出時也會主動清。公用電腦上不會留下東西，而且不必依賴使用者記得登出。
+   代價是「不登入就等於空白工具」——真正保存資料的地方是雲端（見 drive.js）。
    ============================================================ */
 
 (function () {
@@ -11,6 +16,52 @@
 
   var STORAGE_KEY = 'stickyNotes.data.v2';
   var SCHEMA_VERSION = 2;
+
+  /* ---------- 儲存後端 ----------
+     只有這裡決定資料放哪一種儲存，其他地方一律走 store()。
+     沒有 sessionStorage 的極端情況（很舊的瀏覽器、被政策關掉）退回一個
+     記憶體版本：程式照樣跑得完，只是重新整理就沒了——比整個壞掉好。 */
+
+  var memStore = (function () {
+    var m = {};
+    return {
+      get length() { return Object.keys(m).length; },
+      key: function (i) { return Object.keys(m)[i]; },
+      getItem: function (k) { return Object.prototype.hasOwnProperty.call(m, k) ? m[k] : null; },
+      setItem: function (k, v) { m[k] = String(v); },
+      removeItem: function (k) { delete m[k]; }
+    };
+  }());
+
+  /* 後端**只挑一次**，挑完就記住。
+     每次呼叫都重新探測是個陷阱：探測用的寫入在空間滿了的時候也會丟錯，
+     於是 store() 會偷偷改回記憶體版本、寫入「成功」，使用者永遠看不到
+     「存不進去」那個警告——靜默失敗比報錯更糟（11.44）。
+     挑定之後，後來寫不進去就讓錯誤往上丟，由 saveNow 回報。 */
+  var chosen = null;
+  var degraded = false;
+
+  function store() {
+    if (chosen) return chosen;
+    try {
+      if (window.sessionStorage) {
+        // 真的寫得進去才算可用（無痕視窗或政策關掉時會丟錯）
+        window.sessionStorage.setItem('stickyNotes.probe', '1');
+        window.sessionStorage.removeItem('stickyNotes.probe');
+        chosen = window.sessionStorage;
+        return chosen;
+      }
+    } catch (e) { /* 不能用就走記憶體版本 */ }
+    degraded = true;
+    chosen = memStore;
+    return chosen;
+  }
+
+  /** 這個瀏覽器根本不讓網頁暫存資料，只剩記憶體可用（重新整理就沒了）。 */
+  function memoryOnly() {
+    store();
+    return degraded;
+  }
 
   /* ---------- 小工具 ---------- */
 
@@ -553,7 +604,7 @@
   }
 
   /**
-   * 標記資料已變更：更新時間戳、通知畫面重繪、延遲寫入 localStorage。
+   * 標記資料已變更：更新時間戳、通知畫面重繪、延遲寫入分頁暫存。
    * 延遲 1 秒是為了避免打字時每按一個鍵就寫一次硬碟。
    */
   function touch(skipRender) {
@@ -574,10 +625,10 @@
   function saveNow() {
     if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      store().setItem(STORAGE_KEY, JSON.stringify(data));
       saveFailed = false;
     } catch (e) {
-      console.error('寫入 localStorage 失敗', e);
+      console.error('寫入分頁暫存失敗', e);
       // 每秒都會再試一次，所以只在「從成功變成失敗」的那一刻講一次
       if (!saveFailed) {
         saveFailed = true;
@@ -588,23 +639,76 @@
     }
   }
 
+  /* 舊版（v4.21 以前）把資料放在 localStorage。第一次跑新版時搬進分頁暫存，
+     然後**把 localStorage 那把鍵刪掉**——不搬的話使用者會以為資料不見了，
+     不刪的話公用電腦上就還留著一份。搬過一次就永遠不會再遇到。 */
+  var legacyMoved = false;
+
+  function legacyMigrated() { return legacyMoved; }
+
+  /**
+   * 這個分頁是不是「空白工具」的狀態（剛開、登出清過、還沒同步下來）。
+   * 同步的決策表用它判斷「本機空的就直接把雲端拉下來」，所以判斷要保守：
+   * 只要有任何內容或保留區的東西就不算空。
+   */
+  function isEmpty() {
+    if ((data.trash || []).length) return false;
+    var tabs = data.tabs || [];
+    if (tabs.length > 1) return false;
+    if (!tabs.length) return true;
+    var t = tabs[0];
+    if (t.type !== 'quickphrase') return false;
+    if ((t.rows || []).length) return false;
+    return !t.title || t.title === '未命名';
+  }
+
+  function takeLegacy() {
+    var raw = null;
+    try {
+      raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        localStorage.removeItem(STORAGE_KEY);
+        legacyMoved = true;
+      }
+      // 舊版的同步狀態也一起清掉（新版放在分頁暫存，見 drive.js）
+      localStorage.removeItem('stickyNotes.drive.v1');
+    } catch (e) { /* 讀不到或刪不掉都不影響下面的流程 */ }
+    return raw;
+  }
+
   function load() {
     try {
-      var raw = localStorage.getItem(STORAGE_KEY);
+      var raw = store().getItem(STORAGE_KEY);
+      // 這個分頁還沒有資料時，才看看 localStorage 有沒有舊版留下來的
+      if (!raw) raw = takeLegacy();
       if (raw) {
         var parsed = JSON.parse(raw);
         if (parsed && parsed.categories) {
           data = migrate(parsed);
           // 過期的保留區項目在載入時順手清掉，不排計時器
           purgeTrash();
+          if (legacyMoved) saveNow();   // 搬進來的資料要真的落在分頁暫存裡
           return;
         }
       }
     } catch (e) {
-      console.error('讀取 localStorage 失敗，改用空白資料', e);
+      console.error('讀取分頁暫存失敗，改用空白資料', e);
     }
     data = emptyData();
     saveNow();
+  }
+
+  /**
+   * 清掉這個分頁的資料，回到空白（登出時用）。
+   * 分頁暫存本來關掉分頁就會消失，這裡是「不等關分頁，現在就清」。
+   */
+  function wipeLocal() {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    try { store().removeItem(STORAGE_KEY); } catch (e) { /* 清不掉也要繼續 */ }
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* 舊鍵保險再刪一次 */ }
+    data = emptyData();
+    saveFailed = false;
+    notify();
   }
 
   /* ---------- 格式相容 ---------- */
@@ -1540,18 +1644,18 @@
 
   /* ---------- 瀏覽器儲存空間 ---------- */
 
-  /* 實測 Chrome 的 localStorage 上限是 5,242,880 個「字」，
-     中文與英文各算一個（用中文與英文各寫到爆確認過，數字相同）。
-     算的是整個來源的全部鍵值，不是只算這個工具——同一個 GitHub 帳號底下
-     的其他 Pages 專案跟這裡共用同一份 localStorage（來源不含路徑）。 */
+  /* 實測 Chrome 的上限是 5,242,880 個「字」，中文與英文各算一個
+     （用中文與英文各寫到爆確認過，數字相同）。分頁暫存與 localStorage
+     各自有自己的額度，所以現在算的是**這個分頁**用掉多少。 */
   var STORAGE_LIMIT = 5 * 1024 * 1024;
 
   function storageUsage() {
     var used = 0;
     try {
-      for (var i = 0; i < localStorage.length; i++) {
-        var k = localStorage.key(i);
-        var v = localStorage.getItem(k);
+      var s = store();
+      for (var i = 0; i < s.length; i++) {
+        var k = s.key(i);
+        var v = s.getItem(k);
         used += (k ? k.length : 0) + (v ? v.length : 0);
       }
     } catch (e) {
@@ -1574,7 +1678,7 @@
     var out = { tabs: [], trash: 0, other: 0 };
     var own = 0;
     try {
-      own = (localStorage.getItem(STORAGE_KEY) || '').length;
+      own = (store().getItem(STORAGE_KEY) || '').length;
       var u = storageUsage();
       out.other = u ? Math.max(0, u.used - own - STORAGE_KEY.length) : 0;
     } catch (e) { /* 讀不到就當 0，不要因此整段失敗 */ }
@@ -1975,6 +2079,10 @@
     TRASH_MAX: TRASH_MAX,
     moveNoteItem: moveNoteItem,
     moveLink: moveLink,
+    wipeLocal: wipeLocal,
+    memoryOnly: memoryOnly,
+    legacyMigrated: legacyMigrated,
+    isEmpty: isEmpty,
     togglePin: togglePin,
     pinnedCount: pinnedCount,
     PIN_LIMIT: PIN_LIMIT,

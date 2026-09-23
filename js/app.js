@@ -2228,6 +2228,13 @@
         Drive.signIn();
       });
       row.appendChild(inBtn);
+
+      /* 連不上 Google 的時候還有一條路：匯入備份檔。它只進這個分頁的暫存區，
+         關掉分頁就沒了，但至少當下有東西可以用。 */
+      var alt = document.createElement('div');
+      alt.className = 'sy-hint';
+      alt.textContent = '連不上的話可以「☰ → 匯入資料」用備份檔，只存在這個分頁';
+      p.appendChild(alt);
     } else {
       var mail = document.createElement('div');
       mail.className = 'sy-mail';
@@ -2240,9 +2247,10 @@
       nowBtn.addEventListener('click', function () { Drive.syncNow(); });
       var outBtn = document.createElement('button');
       outBtn.textContent = '登出';
+      outBtn.title = '登出會把這個分頁的資料一併清掉';
       outBtn.addEventListener('click', function () {
         p.hidden = true;
-        Drive.signOut();
+        doSignOut();
       });
       row.appendChild(nowBtn);
       row.appendChild(outBtn);
@@ -2250,6 +2258,58 @@
 
     p.appendChild(row);
     p.hidden = false;
+  }
+
+  /**
+   * 登出。資料放在分頁暫存，登出會一併清掉——公用電腦上不能只斷開雲端、
+   * 把內容留在瀏覽器裡。
+   *
+   * 唯一會被打斷的情況是**有變更還沒上到雲端**（離線、上傳失敗）：
+   * 那時候清掉就是真的弄丟了，所以先問，並給一顆「先匯出留底」。
+   */
+  function doSignOut() {
+    Drive.signOut().then(function (r) {
+      if (r !== 'pending') {
+        Clip.toast('已登出，這個分頁的資料已清除');
+        return;
+      }
+      var wrap = document.createElement('div');
+      wrap.innerHTML =
+        '<div style="line-height:1.7;color:var(--text-dim)">' +
+        '有變更<strong style="color:var(--text)">還沒上傳到雲端</strong>' +
+        '（可能是離線或上傳失敗）。<br>' +
+        '登出會把這個分頁的資料清掉，那些變更就找不回來了。' +
+        '</div>';
+
+      var save = document.createElement('button');
+      save.className = 'btn-plain';
+      save.style.cssText = 'margin-top:12px;padding:6px 12px;border:1px solid var(--border-strong);' +
+                           'border-radius:var(--radius-sm);background:var(--raise-xs);' +
+                           'color:var(--text);font-family:inherit;font-size:12px;cursor:pointer';
+      save.textContent = '先匯出這台的資料留底';
+      save.addEventListener('click', function () { handleMenu('export'); });
+      wrap.appendChild(save);
+
+      showModal({
+        title: '要登出嗎？',
+        body: wrap,
+        noEscape: true,      // 按下去資料就清掉，不讓 Esc 順手關掉
+        buttons: [
+          { text: '先不要', onClick: closeModal },
+          {
+            text: '還是要登出',
+            // danger-btn 是給 .icon-btn 用的，彈窗的破壞性按鈕走 btn-danger
+            cls: 'btn-danger',
+            onClick: function () {
+              closeModal();
+              Drive.signOut({ force: true }).then(function () {
+                Clip.toast('已登出，這個分頁的資料已清除');
+              });
+            }
+          }
+        ]
+      });
+    });
   }
 
   /**
@@ -2303,7 +2363,7 @@
     // 小視窗排在最後：主題與自訂配色都套好了，抄過去才是對的
     PiP.render();
     scheduleDueCheck();
-    maybeWarnQuota();   // 自己有節流，不會每次重繪都去掃 localStorage
+    maybeWarnQuota();   // 自己有節流，不會每次重繪都去掃儲存空間
   }
 
   /* ============================================================
@@ -2942,17 +3002,18 @@
     showModal({
       title: '變更畫面失敗，未成功儲存',
       body: '<div style="line-height:1.8;color:var(--text-dim)">'
-        + '<strong>剛才的變更還在畫面上，但沒有寫進這台電腦的瀏覽器。</strong>'
-        + '現在重新整理就會回到上一次成功儲存的狀態。<br><br>'
+        + '<strong>剛才的變更還在畫面上，但沒有寫進這個分頁的暫存區。</strong>'
+        + '現在重新整理會回到上一次成功儲存的狀態；'
+        + '已經登入雲端的話，下一次同步仍然會把畫面上的內容傳上去。<br><br>'
         + '<strong>常見原因</strong><br>'
-        + '· 這個網站的儲存空間滿了（瀏覽器大約給每個網站 5MB）<br>'
-        + '· 用的是無痕視窗，或瀏覽器設定擋掉了網站資料<br>'
+        + '· 這個分頁的儲存空間滿了（瀏覽器大約給每個網站 5MB）<br>'
+        + '· 瀏覽器設定擋掉了網站資料<br>'
         + '· 硬碟空間不足<br><br>'
         + '<strong>建議照這個順序處理</strong><br>'
         + '1. 先「☰ → 匯出資料」存一份檔案——畫面上的內容是完整的，先留底<br>'
         + '2. 「☰ → 最近刪除」按「全部清空」<br>'
         + '3. 刪掉用不到的卡片，特別是內容很長的便籤<br>'
-        + '4. 確認不是無痕視窗<br>'
+        + '4. 確認瀏覽器沒有擋掉網站資料（無痕視窗不影響分頁暫存）<br>'
         + '5. 都做完還是跳這個訊息，就用剛才那份匯出檔在另一台電腦匯入'
         + '</div>',
       buttons: [{ text: '知道了', cls: 'btn-primary', onClick: closeModal }]
@@ -3050,7 +3111,7 @@
     showModal({
       title: '儲存空間快滿了',
       body: '<div style="line-height:1.8;color:var(--text-dim)">'
-        + '這個網站在瀏覽器裡的儲存空間已經用掉 <strong>' + u.percent + '%</strong>'
+        + '這個分頁的儲存空間已經用掉 <strong>' + u.percent + '%</strong>'
         + '（' + fmtMB(u.used) + '／' + fmtMB(u.limit) + '）。'
         + '<strong>滿了之後新的變更會存不進去。</strong><br><br>'
         + '<strong>建議照這個順序處理</strong><br>'
@@ -3112,10 +3173,14 @@
           '• 常用語從右側 ✎ 編輯；卡片標題、便籤、待辦點文字就能改<br>' +
           '• 多行內容用 Ctrl+Enter 存檔，直接按 Enter 是換行<br>' +
           '• 主題與卡片上色方式在 ☰ →「外觀」切換<br><br>' +
-          '<strong style="color:var(--text)">目前的資料存在哪</strong><br>' +
-          '存在這台電腦的瀏覽器裡。<strong>還沒接上 Google Drive</strong>，' +
-          '所以換電腦、或系統還原之後資料不會跟著走——' +
-          '這個階段請養成用「匯出資料」留底的習慣。<br><br>' +
+          '<strong style="color:var(--text)">資料存在哪</strong><br>' +
+          '<strong>放在這個分頁的暫存區，關掉分頁就清掉</strong>，登出也會清掉。' +
+          '真正長期保存的地方是雲端同步（頂部列那顆雲朵）——' +
+          '登入之後資料會存在你自己雲端硬碟的隱藏資料夾裡，' +
+          '換電腦或重開機打開網址、登入同一個帳號就回來了。<br>' +
+          '所以：<strong>沒登入的話，這個分頁關掉東西就沒了</strong>。' +
+          '公用電腦上這是刻意的（不留痕跡）；自己的電腦上請先登入再輸入內容，' +
+          '或用「匯出資料」自己留一份。<br><br>' +
           '<strong style="color:var(--text)">儲存空間滿了怎麼辦</strong><br>' +
           '☰ 選單最下面看得到用掉幾 %，超過 80% 會提醒一次。' +
           '正常打字很難用完（要八千多條常用語才會到 80%），' +
@@ -3123,13 +3188,9 @@
           '1. 先「匯出資料」存一份留底，不管後面做什麼都先把東西拿到手上<br>' +
           '2. 「最近刪除」按「全部清空」——保留區裝的是完整的卡片內容<br>' +
           '3. 找出真正大的東西，最常見的是把長文件整篇貼進便籤<br>' +
-          '4. 看看是不是別的專案佔走的。容量算的是<strong>整個網址</strong>，' +
-          '同一個 GitHub 帳號下的其他 Pages 專案跟這裡共用同一份空間' +
-          '（F12 →「應用程式」→「本機儲存空間」看得到）<br>' +
-          '5. 最後手段：匯出、按 F12 清掉這個網站的資料、再匯入回來<br>' +
-          '接上 Google Drive 之後<strong>這道牆還是在</strong>，' +
-          '那是多存一份到雲端，程式仍然從瀏覽器讀寫。' +
-          '真的需要更大的空間時要換儲存方式，那是另一項工程。<br><br>' +
+          '4. 最後手段：匯出、關掉這個分頁重開（暫存區跟著清空）、再匯入回來<br>' +
+          '算的是<strong>這個分頁</strong>用掉多少，跟別的分頁與其他專案各自計算。' +
+          '雲端同步不會放寬這道牆——資料要先放得進分頁暫存才談得上同步。<br><br>' +
           '<strong style="color:var(--text)">尚未實作</strong><br>' +
           'Google 登入與雲端同步、全域鎖定、表格／參考清單。' +
           '</div>',
@@ -3160,9 +3221,42 @@
     });
     DB.onChange(render);
 
-    /* 雲端同步。登入一律由使用者按，開啟頁面不主動跳授權視窗——
-       只是想看一眼常用語的時候被 Google 的視窗擋住很煩。 */
+    /* 雲端同步。**不主動跳授權視窗**——只是想看一眼常用語的時候被 Google
+       的視窗擋住很煩。但這個分頁先前登入過時會自動去靜默取一次權杖
+       （drive.js 的 resume），那個動作不跳任何視窗，所以重新整理之後
+       資料會自己回來。 */
     Drive.init({ onStatus: updateSyncBtn, onConflict: askConflict });
+
+    /* 連分頁暫存都不能用時（某些瀏覽器設定），資料只在記憶體裡——
+       重新整理就沒了。這種狀況一定要講，不然使用者會以為存好了（11.44）。 */
+    if (DB.memoryOnly()) {
+      setTimeout(function () {
+        Clip.toast('這個瀏覽器不讓網頁暫存資料，這一輪的內容只在記憶體裡，'
+          + '重新整理就會消失——請先登入雲端，或用「☰ → 匯出資料」留底', true);
+      }, 600);
+    }
+
+    /* 舊版的資料放在 localStorage，新版改成分頁暫存。搬過來之後講一聲，
+       不然「關掉分頁就沒了」這個新行為會讓人措手不及。 */
+    if (DB.legacyMigrated()) {
+      setTimeout(function () {
+        showModal({
+          title: '資料的存放方式改了',
+          body: '<div style="line-height:1.8;color:var(--text-dim)">'
+            + '你原本存在這個瀏覽器裡的資料已經<strong>搬到這個分頁的暫存區</strong>，'
+            + '內容一樣，畫面看起來也一樣。<br><br>'
+            + '<strong>差別是：關掉這個分頁（或登出）資料就會清掉。</strong>'
+            + '這是為了在公用電腦上不留痕跡。<br><br>'
+            + '長期保存請用<strong>雲端同步</strong>（頂部列那顆雲朵）：'
+            + '登入之後資料存在你自己雲端硬碟的隱藏資料夾，'
+            + '換電腦或重開機登入同一個帳號就回來了。<br><br>'
+            + '現在建議先做兩件事：<strong>登入雲端</strong>，'
+            + '或先「☰ → 匯出資料」把這份東西存成檔案。'
+            + '</div>',
+          buttons: [{ text: '知道了', cls: 'btn-primary', onClick: closeModal }]
+        });
+      }, 400);
+    }
 
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) clearDueTimer();
