@@ -2409,3 +2409,34 @@ textarea,
 .tp-status.bad { color: var(--danger); }
 /* TOTP 卡的眼睛：遮起來時亮一點，看得出目前是遮著的 */
 .tp-eye.on { color: var(--accent); }
+
+/* ============================================================
+   v4.31：使用說明（☰ →「關於／說明」）
+   一整頁往下捲。寬版彈窗只給這種「要一直往下讀」的內容用。
+   ============================================================ */
+#modal.modal-wide { width: min(640px, 94vw); }
+.help { font-size: 13px; line-height: 1.75; color: var(--text-dim); }
+.help b { color: var(--text); font-weight: 600; }
+.help-h {
+  margin: 18px 0 6px;
+  font-size: 13.5px;
+  color: var(--text);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.help-h:first-child { margin-top: 0; }
+.help-list { margin: 0; padding-left: 20px; }
+.help-list li { margin: 2px 0; }
+.help-p { margin: 0; }
+.help-card {
+  padding: 8px 10px;
+  margin: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.help-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 2px; }
+.help-card-head span { color: var(--text-faint); font-size: 12px; }
+.help-row { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; }
+.help-row em { font-style: normal; color: var(--text-faint); font-size: 12px; padding-top: 1px; }
+.help-qa { margin: 6px 0; }
+.help-qa b { display: block; }
