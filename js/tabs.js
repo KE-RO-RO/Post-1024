@@ -340,6 +340,15 @@
         'collapse-btn'));
     }
 
+    /* TOTP 卡的收合鈕放回標題列（9/27 使用者：收在 ⋯ 裡操作不方便）。
+       位置跟一般卡片一樣在 ⋯ 左邊；彈出、顏色、釘選仍收在 ⋯。私人卡片不變 */
+    if (!RO && tab.type === 'totp') {
+      head.appendChild(iconBtn(collapsed ? '▸' : '▾',
+        collapsed ? '展開這張卡片' : '收合成一條',
+        function () { DB.toggleCollapse(tab.id); },
+        'collapse-btn'));
+    }
+
     if (!RO) {
       head.appendChild(svgIconBtn(MORE_SVG, '更多', function () {
         ctx.openCardMenu(tab, cardMenuItems(tab, ctx));
@@ -395,10 +404,13 @@
         text: tab.pinned ? '取消釘選' : '釘選（固定在最上面）',
         onClick: function () { ctx.togglePin(tab); }
       });
-      items.push({
-        text: tab.collapsed ? '展開這張卡片' : '收合成一條',
-        onClick: function () { DB.toggleCollapse(tab.id); }
-      });
+      // TOTP 卡的收合鈕在標題列上（9/27），選單裡不重複
+      if (tab.type !== 'totp') {
+        items.push({
+          text: tab.collapsed ? '展開這張卡片' : '收合成一條',
+          onClick: function () { DB.toggleCollapse(tab.id); }
+        });
+      }
     }
 
     if (!ctx.pipSupported()) {
