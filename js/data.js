@@ -963,6 +963,17 @@
     for (var i = 0; i < listeners.length; i++) listeners[i]();
   }
 
+  /* 只重畫、資料沒變（v4.30）。例如加密卡片解密完、把明文放進記憶體之後。
+     以前這裡用 touch()，會更新修改時間、被雲端同步當成「有變更」——
+     每次解鎖或下載後重新解密都多傳一次，10 秒內另一台也改過就多跳一次衝突。
+     監聽者可以用 isRefreshing() 分辨，雲端同步就是這樣跳過的。 */
+  var refreshing = false;
+  function refresh() {
+    refreshing = true;
+    try { notify(); } finally { refreshing = false; }
+  }
+  function isRefreshing() { return refreshing; }
+
   /**
    * 標記資料已變更：更新時間戳、通知畫面重繪、延遲寫入分頁暫存。
    * 延遲 1 秒是為了避免打字時每按一個鍵就寫一次硬碟。
@@ -2396,6 +2407,8 @@
     load: load,
     saveNow: saveNow,
     touch: touch,
+    refresh: refresh,
+    isRefreshing: isRefreshing,
     onChange: onChange,
     raw: function () { return data; },
     categories: categories,

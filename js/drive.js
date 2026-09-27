@@ -61,7 +61,13 @@
     state: 'out',      // out 未登入 / ok 已同步 / syncing 同步中 / error 失敗 / offline 離線
     msg: '',
     email: '',
-    at: '',            // 最後同步成功的時間（ISO）
+    /* 兩個時間分開（v4.30）：
+       at      = 最後一次對過帳時「資料本身」的版本時間（跟雲端那份的 updatedAt 比，決策表用）
+       syncedAt = 最後一次同步成功的「當下」時間（畫面上顯示「已同步 · N 分鐘前」用）
+       以前畫面顯示的是 at，按「立刻同步」時沒有東西要傳，就一直顯示資料最後被改的時間，
+       看起來像「同步完成了，時間卻是 30 分鐘前」。 */
+    at: '',
+    syncedAt: '',
     fileId: '',
     dirty: false
   };
@@ -69,7 +75,7 @@
   var token = '';
   var tokenExp = 0;
   var tokenClient = null;
-  var ui = { onStatus: function () {}, onConflict: function () {} };
+  var ui = { onStatus: function () {}, onConflict: function () {}, onResumeFail: function () {} };
   var autoTimer = null;
   var renewTimer = null;
   var started = false;
@@ -90,7 +96,7 @@
   }
 
   function status() {
-    return { state: st.state, msg: st.msg, email: st.email, at: st.at, dirty: st.dirty };
+    return { state: st.state, msg: st.msg, email: st.email, at: st.at, syncedAt: st.syncedAt, dirty: st.dirty };
   }
 
   /* ---------- 這台機器記住的東西 ---------- */
@@ -115,6 +121,7 @@
       var o = JSON.parse(raw);
       if (o && typeof o === 'object') {
         st.at = typeof o.at === 'string' ? o.at : '';
+        st.syncedAt = typeof o.syncedAt === 'string' ? o.syncedAt : '';
         st.email = typeof o.email === 'string' ? o.email : '';
         st.fileId = typeof o.fileId === 'string' ? o.fileId : '';
         st.dirty = !!o.dirty;
@@ -131,7 +138,7 @@
       var b = box();
       if (!b) return;
       b.setItem(LOCAL_KEY, JSON.stringify({
-        at: st.at, email: st.email, fileId: st.fileId,
+        at: st.at, syncedAt: st.syncedAt, email: st.email, fileId: st.fileId,
         dirty: st.dirty, seenLogin: seenLogin,
         clean: clean === true ? true : !st.dirty
       }));
@@ -378,7 +385,35 @@
     });
   }
 
+  /**
+   * 雲端那份蓋進來之前，把記憶體裡解開的明文丟掉（v4.30 修正）。
+   *
+   * 私人卡片與驗證碼卡解鎖後，畫面讀的是記憶體裡的明文（Vault.getPlain），
+   * 不是資料檔裡的密文。以前下載覆蓋只換掉密文、明文留著——畫面上照樣看得到
+   * 剛加的帳號，其實存檔裡已經是雲端的舊版，重新整理才發現不見了。
+   *
+   * 同一張卡片（加密設定沒變）：只丟明文，畫面重畫時用同一把金鑰重新解一次。
+   * 加密設定變了（另一台重建過）或卡片不見了：整張鎖回去，要重新輸入主密碼。
+   */
+  function dropStalePlain(text) {
+    if (typeof Vault === 'undefined' || !Vault.getPlain) return;
+    var incoming = {};
+    try {
+      ((JSON.parse(text) || {}).tabs || []).forEach(function (t) {
+        if (t && t.id) incoming[t.id] = JSON.stringify(t.vault || null);
+      });
+    } catch (e) { /* 解析失敗的話 importJson 自己會丟錯，這裡不用管 */ }
+    (DB.raw().tabs || []).forEach(function (t) {
+      if (!t || !Vault.isCardUnlocked(t.id)) return;
+      var same = incoming.hasOwnProperty(t.id) &&
+                 incoming[t.id] === JSON.stringify(t.vault || null);
+      if (same) Vault.setPlain(t.id, null);
+      else Vault.lockCard(t.id);
+    });
+  }
+
   function applyCloud(text) {
+    dropStalePlain(text);
     DB.importJson(text);                 // 裡面會做完整驗證，壞資料一律丟掉
     st.at = DB.raw().updatedAt;
     st.dirty = false;
@@ -420,7 +455,11 @@
         return 'none';
       });
     }).then(function (r) {
-      if (r !== 'conflict') setState('ok');
+      if (r !== 'conflict') {
+        st.syncedAt = new Date().toISOString();
+        saveLocal();
+        setState('ok');
+      }
       return r;
     }).catch(function (e) {
       var r = explain(e);          // D：把原因講清楚，不要一律「需要重新登入」
@@ -430,9 +469,15 @@
   }
 
   function scheduleAuto() {
-    if (st.state === 'out') return;
+    if (DB.isRefreshing && DB.isRefreshing()) return;   // 只是重畫，資料沒變
     st.dirty = true;
     saveLocal(false);    // 記下「有東西還沒上去」，重新整理後還判斷得出來
+    /* 未登入時也要記下 dirty（v4.30 修正）。重新整理後自動續登失敗時，
+       畫面上的資料還在、照樣能改；以前這段修改不算 dirty，重新登入時決策表
+       以為本機沒動過，直接拿雲端的舊版蓋掉，剛改的東西就不見了。
+       現在重新登入會照決策表走：雲端沒被別台動過就上傳，動過就問一次。
+       未登入時只記、不排上傳。 */
+    if (st.state === 'out') { emit(); return; }
     if (autoTimer) clearTimeout(autoTimer);
     autoTimer = setTimeout(function () { syncNow(); }, AUTO_DELAY);
     emit();
@@ -474,6 +519,9 @@
       return syncNow();
     }, function () {
       setState('out', '尚未登入雲端同步');
+      /* 畫面上還有資料時要講出來（v4.30）：使用者看得到東西、以為還在同步，
+         其實已經掉回未登入，改的東西要等重新登入才上得去 */
+      if (!DB.isEmpty()) ui.onResumeFail();
       return 'out';
     });
   }
@@ -501,7 +549,7 @@
       token = ''; tokenExp = 0;
       if (renewTimer) { clearTimeout(renewTimer); renewTimer = null; }
       if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
-      st.state = 'out'; st.email = ''; st.fileId = ''; st.at = ''; st.dirty = false;
+      st.state = 'out'; st.email = ''; st.fileId = ''; st.at = ''; st.syncedAt = ''; st.dirty = false;
       seenLogin = false;
       /* 最後同步時間也清掉。資料都不留了，留著它沒有意義，而且下次登入
          本機是空的，決策表會直接下載，不會跳衝突。 */
@@ -528,20 +576,18 @@
   function init(opt) {
     if (opt && opt.onStatus) ui.onStatus = opt.onStatus;
     if (opt && opt.onConflict) ui.onConflict = opt.onConflict;
+    if (opt && opt.onResumeFail) ui.onResumeFail = opt.onResumeFail;
     if (started) { emit(); return; }
     started = true;
     loadLocal();
 
-    DB.onChange(function () {
-      if (st.state !== 'out') scheduleAuto();
-    });
+    // 未登入也要記 dirty（見 scheduleAuto），所以這裡不再擋 out
+    DB.onChange(scheduleAuto);
     /* 不重畫的變更（就地編輯文字、改標題、記住高度、連結勾選）不會發 onChange，
        要另外聽 onDirty，否則那些修改不會排上傳（v4.24 修正）。
        一般變更兩個都會發，scheduleAuto 只是把計時器重設一次，沒有副作用。 */
     if (DB.onDirty) {
-      DB.onDirty(function () {
-        if (st.state !== 'out') scheduleAuto();
-      });
+      DB.onDirty(scheduleAuto);
     }
 
     window.addEventListener('online', function () {

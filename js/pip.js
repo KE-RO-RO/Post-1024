@@ -151,7 +151,7 @@
           close();
           if (ui.unlockedToast) ui.unlockedToast(tab, d);
           else Clip.toast('已解鎖，' + (ui.autoLockMinutes || 10) + ' 分鐘後自動鎖定', false, d);
-          DB.touch();
+          DB.refresh();     // 解鎖不是修改資料，只重畫（v4.30，主視窗本來就只呼叫 render）
         },
         function () {
           err.textContent = '主密碼不正確';

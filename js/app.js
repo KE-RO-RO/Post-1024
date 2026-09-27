@@ -2635,7 +2635,8 @@
     if (!dot) return;
     dot.dataset.s = s.state;
     var t = SYNC_TEXT[s.state] || '';
-    if (s.state === 'ok' && s.at) t += ' · ' + (sinceText(s.at) || '剛剛');
+    // 顯示的是「最後一次同步成功的當下」，不是資料最後被改的時間（v4.30）
+    if (s.state === 'ok' && s.syncedAt) t += ' · ' + (sinceText(s.syncedAt) || '剛剛');
     if (s.state === 'ok' && s.dirty) t = '有變更還沒上傳';
     if (s.msg) t += '（' + s.msg + '）';
     $('btnSync').title = t;
@@ -2657,7 +2658,7 @@
     var txt = document.createElement('span');
     if (s.state === 'ok') {
       txt.innerHTML = s.dirty ? '有變更還沒上傳'
-        : '已同步' + (s.at ? ' · <b>' + (sinceText(s.at) || '剛剛') + '</b>' : '');
+        : '已同步' + (s.syncedAt ? ' · <b>' + (sinceText(s.syncedAt) || '剛剛') + '</b>' : '');
     } else {
       txt.textContent = SYNC_TEXT[s.state] || '';
     }
@@ -3773,7 +3774,14 @@
        的視窗擋住很煩。但這個分頁先前登入過時會自動去靜默取一次權杖
        （drive.js 的 resume），那個動作不跳任何視窗，所以重新整理之後
        資料會自己回來。 */
-    Drive.init({ onStatus: updateSyncBtn, onConflict: askConflict });
+    Drive.init({
+      onStatus: updateSyncBtn,
+      onConflict: askConflict,
+      onResumeFail: function () {
+        Clip.toast('雲端沒有自動登入成功，請按右上角雲朵重新登入。' +
+          '在那之前改的東西都還在，登入後會補傳', true);
+      }
+    });
 
     /* 連分頁暫存都不能用時（某些瀏覽器設定），資料只在記憶體裡——
        重新整理就沒了。這種狀況一定要講，不然使用者會以為存好了（11.44）。 */

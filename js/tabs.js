@@ -1477,11 +1477,11 @@
       // 解密是非同步的，拿到之後放進記憶體再重繪一次
       Vault.decryptFor(tab.id, tab.enc).then(function (list) {
         Vault.setPlain(tab.id, list || []);
-        DB.touch();
+        DB.refresh();     // 只重畫：解密不是修改（v4.30）
       }, function () {
         Vault.setPlain(tab.id, []);
         Clip.toast('這張卡片的內容解不開', true);
-        DB.touch();
+        DB.refresh();
       });
       return;
     }
@@ -2327,11 +2327,11 @@
         // 解出來的東西照樣過白名單：資料檔可能被動過
         var clean = (list || []).map(DB.totpNormalizeEntry).filter(Boolean);
         Vault.setPlain(tab.id, clean);
-        DB.touch();
+        DB.refresh();     // 只重畫：解密不是修改（v4.30）
       }, function () {
         Vault.setPlain(tab.id, []);
         Clip.toast('這張卡片的內容解不開', true);
-        DB.touch();
+        DB.refresh();
       });
       return;
     }
