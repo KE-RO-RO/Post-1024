@@ -285,7 +285,9 @@
         head.appendChild(svgIconBtn(hid ? EYE_OFF_SVG : EYE_SVG, hid ? '顯示' : '隱藏', function () {
           if (tpHidden[tab.id]) delete tpHidden[tab.id];
           else tpHidden[tab.id] = true;
-          DB.touch();   // 同私人卡片展開收合的做法：重畫主視窗，小視窗跟著重畫
+          /* 只重畫（主視窗與小視窗都跟著重畫）。遮住數字不是修改資料，
+             用 touch() 會被雲端同步當成有變更、多傳一次（v4.31，同 DB.refresh 的理由） */
+          DB.refresh();
         }, 'pip-ok tp-eye' + (hid ? ' on' : '')));
       }
       head.appendChild(svgIconBtn(LOCK_SVG, '鎖定', function () {
@@ -340,9 +342,10 @@
         'collapse-btn'));
     }
 
-    /* TOTP 卡的收合鈕放回標題列（9/27 使用者：收在 ⋯ 裡操作不方便）。
-       位置跟一般卡片一樣在 ⋯ 左邊；彈出、顏色、釘選仍收在 ⋯。私人卡片不變 */
-    if (!RO && tab.type === 'totp') {
+    /* 精簡標題列的收合鈕放回標題列（9/27 使用者：收在 ⋯ 裡操作不方便。
+       先改 TOTP，同一天私人卡片也要一樣）。位置跟一般卡片一樣在 ⋯ 左邊；
+       彈出、顏色、釘選仍收在 ⋯ */
+    if (!RO && slim) {
       head.appendChild(iconBtn(collapsed ? '▸' : '▾',
         collapsed ? '展開這張卡片' : '收合成一條',
         function () { DB.toggleCollapse(tab.id); },
@@ -404,13 +407,7 @@
         text: tab.pinned ? '取消釘選' : '釘選（固定在最上面）',
         onClick: function () { ctx.togglePin(tab); }
       });
-      // TOTP 卡的收合鈕在標題列上（9/27），選單裡不重複
-      if (tab.type !== 'totp') {
-        items.push({
-          text: tab.collapsed ? '展開這張卡片' : '收合成一條',
-          onClick: function () { DB.toggleCollapse(tab.id); }
-        });
-      }
+      // 收合鈕在標題列上（9/27），選單裡不重複
     }
 
     if (!ctx.pipSupported()) {
@@ -2445,7 +2442,7 @@
         // 遮起來的時候，點數字是「再露出來」，不是複製（跟按眼睛一樣）
         if (tpHidden[tab.id]) {
           delete tpHidden[tab.id];
-          DB.touch();
+          DB.refresh();     // 露出數字只是重畫，不是修改
           return;
         }
         if (live.code) Clip.copy(live.code, code, entry.name || '驗證碼');
