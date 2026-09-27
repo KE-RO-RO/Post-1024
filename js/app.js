@@ -2808,6 +2808,60 @@
     });
   }
 
+  /**
+   * 換帳號確認（v4.34）。這個分頁裡是 A 的資料，按登入時選了 B。
+   * 不問就同步的話，B 的雲端是空的會把 A 的資料傳進 B——共用電腦上就是把
+   * 一個人的東西送進別人帳號。回傳 Promise<boolean>：true＝換成 B（清掉 A 在分頁裡的資料）。
+   * 「先匯出」會開匯出流程、蓋掉這個彈窗，所以按了就當作這次先不換，匯出完再按一次登入。
+   */
+  function askAccountSwitch(info) {
+    $('syncPanel').hidden = true;
+    return new Promise(function (resolve) {
+      var wrap = document.createElement('div');
+      wrap.innerHTML =
+        '<div style="line-height:1.7;color:var(--text-dim)">' +
+        '這個分頁裡目前是 <b style="color:var(--text)"></b> 的資料，' +
+        '你這次選的是 <b style="color:var(--text)"></b>。<br><br>' +
+        '換成新帳號時，會先把舊帳號的資料<strong style="color:var(--text)">從這個分頁清掉</strong>，' +
+        '再載入新帳號雲端上的資料。舊帳號雲端上的那份不受影響，之後用舊帳號登入就回來了。' +
+        (info.dirty
+          ? '<br><br><span style="color:var(--danger)">舊帳號還有變更沒上傳到雲端，換帳號後這些變更會不見。' +
+            '要留的話請先匯出。</span>'
+          : '') +
+        '</div>';
+      // 信箱用 textContent 填，不拼進 HTML
+      var bs = wrap.querySelectorAll('b');
+      bs[0].textContent = info.from;
+      bs[1].textContent = info.to;
+
+      var save = document.createElement('button');
+      save.className = 'btn-plain';
+      save.style.cssText = 'margin-top:12px;padding:6px 12px;border:1px solid var(--border-strong);' +
+                           'border-radius:var(--radius-sm);background:var(--raise-xs);' +
+                           'color:var(--text);font-family:inherit;font-size:12px;cursor:pointer';
+      save.textContent = '先匯出舊帳號的資料留底';
+      save.addEventListener('click', function () {
+        // 先關掉：這次已經算「不換」，視窗留著按了也沒作用，只會讓人搞混
+        closeModal();
+        resolve(false);
+        handleMenu('export');
+        Clip.toast('這次先不換帳號。匯出完再按一次登入');
+      });
+      wrap.appendChild(save);
+
+      showModal({
+        title: '要換成另一個帳號嗎？',
+        body: wrap,
+        noEscape: true,      // 選下去會清資料，不讓 Esc 順手決定
+        buttons: [
+          { text: '取消', onClick: function () { closeModal(); resolve(false); } },
+          { text: '換成新帳號', cls: 'btn-primary',
+            onClick: function () { closeModal(); resolve(true); } }
+        ]
+      });
+    });
+  }
+
   function render() {
     applyZoom();
     applyTheme();
@@ -3785,6 +3839,7 @@
       '長期保存靠<b>雲端同步</b>：登入後存在你自己 Google 雲端硬碟的隱藏資料夾，換電腦登入同一個帳號就回來',
       '公用電腦：用完登出，資料就不會留下',
       '雲朵旁的「已同步 · N 分鐘前」是最後一次同步成功的時間',
+      '按雲朵登入時會讓你選帳號，也可以輸入其他帳號；這個分頁裡已經是別的帳號的資料時，會先問你要不要換',
       '重新整理後如果沒有自動登入會跳提醒；重新登入之前改的東西都還在，登入後會補傳。' +
         '另一台在這段時間也改過的話，會問你要留哪一邊',
       '建議偶爾「匯出資料」留一份：雲端那份跟著你改，誤刪也會同步過去',
@@ -3867,6 +3922,7 @@
     Drive.init({
       onStatus: updateSyncBtn,
       onConflict: askConflict,
+      onAccountSwitch: askAccountSwitch,
       onResumeFail: function () {
         Clip.toast('雲端沒有自動登入成功，請按右上角雲朵重新登入。' +
           '在那之前改的東西都還在，登入後會補傳', true);

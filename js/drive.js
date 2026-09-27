@@ -75,7 +75,11 @@
   var token = '';
   var tokenExp = 0;
   var tokenClient = null;
-  var ui = { onStatus: function () {}, onConflict: function () {}, onResumeFail: function () {} };
+  var ui = {
+    onStatus: function () {}, onConflict: function () {}, onResumeFail: function () {},
+    // 沒掛的話（測試）一律同意換帳號
+    onAccountSwitch: function () { return Promise.resolve(true); }
+  };
   var autoTimer = null;
   var renewTimer = null;
   var started = false;
@@ -169,8 +173,14 @@
     });
   }
 
-  /** 向 Google 要一張權杖。prompt 空字串＝靜默（能不跳就不跳）。 */
-  function askToken(prompt) {
+  /**
+   * 向 Google 要一張權杖。
+   * @param {string} prompt ''＝靜默（能不跳就不跳）；'select_account'＝一定跳選擇帳戶
+   * @param {string} hint   靜默時指定帳號（login_hint）。瀏覽器裡同時登入好幾個 Google
+   *                        帳號時，不指定的話 Google 會用它自己的預設帳號，
+   *                        可能不是使用者選的那個（v4.34）
+   */
+  function askToken(prompt, hint) {
     return loadGis().then(function () {
       return new Promise(function (resolve, reject) {
         if (!tokenClient) {
@@ -195,7 +205,9 @@
           reject(new Error(err && err.type ? String(err.type) : '授權被取消'));
         };
         try {
-          tokenClient.requestAccessToken({ prompt: prompt });
+          var req = { prompt: prompt };
+          if (hint) req.login_hint = hint;
+          tokenClient.requestAccessToken(req);
         } catch (e) { reject(e); }
       });
     });
@@ -203,15 +215,18 @@
 
   /**
    * 取得存取權杖。
-   * @param {boolean} interactive 使用者主動按登入時是 true：**先試靜默**，
-   *        失敗才退回強制授權（A）。原本一律 'consent'，等於每次登入
-   *        都自己叫出「選擇帳戶」畫面，即使早就授權過了。
-   *        false 是背景續期，只試靜默，續不到就讓呼叫端顯示需要重新登入。
+   * @param {boolean} interactive 使用者主動按「登入 Google」時是 true：
+   *        **一律跳「選擇帳戶」**（v4.34，使用者 9/27 要的：要自己選或自己輸入帳號）。
+   *        以前是「先試靜默、失敗才強制授權」，跳不跳畫面由 Google 決定，
+   *        瀏覽器裡已登入的帳號會被直接拿來用，他在無痕視窗實測時就被自動登進 A。
+   *        第一次授權的帳號，Google 會在選完帳號後接著跳同意畫面。
+   *        false 是背景續期，只試靜默，而且**指定上次選的帳號**（login_hint），
+   *        續不到就讓呼叫端顯示需要重新登入。
    */
   function getToken(interactive) {
+    if (interactive) return askToken('select_account');
     if (token && now() < tokenExp - 60000) return Promise.resolve(token);
-    if (!interactive) return askToken('');
-    return askToken('').catch(function () { return askToken('consent'); });
+    return askToken('', st.email);
   }
 
   /* C：到期前五分鐘先換一張。沒登入時一個計時器都不排（11.28）。 */
@@ -223,7 +238,7 @@
     renewTimer = setTimeout(function () {
       renewTimer = null;
       if (st.state === 'out') return;
-      askToken('').then(function () {
+      askToken('', st.email).then(function () {
         if (st.state === 'error') setState('ok');
       }, function () {
         /* 續不到就留著現在這張用到過期為止，不在這裡跳提示——
@@ -485,9 +500,51 @@
 
   /* ---------- 對外 ---------- */
 
+  /**
+   * 換帳號（v4.34）。這個分頁原本是 A 的資料、這次選了 B 時，不能直接同步——
+   * B 的雲端是空的就會把 A 的資料傳進 B，共用電腦上等於把一個人的東西送進別人帳號。
+   * 先問（app.js 的 onAccountSwitch），同意才把 A 的資料從這個分頁清掉、再載入 B 的。
+   * A 雲端那份不受影響。
+   */
+  function switchAccount(prev, email) {
+    return ui.onAccountSwitch({ from: prev, to: email, dirty: st.dirty }).then(function (ok) {
+      if (!ok) {
+        // 不換：丟掉剛拿到的 B 權杖，回到未登入，A 的資料原封不動留在分頁裡
+        token = ''; tokenExp = 0;
+        if (renewTimer) { clearTimeout(renewTimer); renewTimer = null; }
+        setState('out', '沒有切換帳號，這個分頁的資料還是 ' + prev + ' 的');
+        return false;
+      }
+      if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+      Vault.lockAll();
+      DB.wipeLocal();
+      // wipeLocal 會發 onChange → scheduleAuto 立起 dirty，這裡要在它之後才歸零
+      st.at = ''; st.syncedAt = ''; st.fileId = ''; st.dirty = false;
+      return true;
+    });
+  }
+
   function signIn() {
     setState('syncing');
+    var prev = st.email;
     return backend.signIn().then(function (email) {
+      if (prev && email && prev !== email && !DB.isEmpty()) {
+        return switchAccount(prev, email).then(function (ok) {
+          return ok ? finishSignIn(email) : 'out';
+        });
+      }
+      return finishSignIn(email);
+    }).catch(function (e) {
+      var r = explain(e);
+      st.state = r.state === 'out' ? 'out' : r.state;
+      setState(st.state, r.msg);
+      return 'error';
+    });
+  }
+
+  function finishSignIn(email) {
+    return Promise.resolve().then(function () {
+      if (email && email !== st.email) st.fileId = '';   // 另一個帳號的檔案 id 不能沿用
       st.email = email || st.email;
       st.state = 'ok';
       seenLogin = true;      // 這個分頁登入過，重新整理時可以自動靜默取權杖（B）
@@ -495,11 +552,6 @@
       scheduleRenew();
       emit();
       return syncNow();
-    }).catch(function (e) {
-      var r = explain(e);
-      st.state = r.state === 'out' ? 'out' : r.state;
-      setState(st.state, r.msg);
-      return 'error';
     });
   }
 
@@ -512,7 +564,7 @@
   function resume() {
     if (!seenLogin || st.state !== 'out') return Promise.resolve('out');
     setState('syncing');
-    return askToken('').then(function () {
+    return askToken('', st.email).then(function () {
       st.state = 'ok';
       scheduleRenew();
       emit();
@@ -577,6 +629,7 @@
     if (opt && opt.onStatus) ui.onStatus = opt.onStatus;
     if (opt && opt.onConflict) ui.onConflict = opt.onConflict;
     if (opt && opt.onResumeFail) ui.onResumeFail = opt.onResumeFail;
+    if (opt && opt.onAccountSwitch) ui.onAccountSwitch = opt.onAccountSwitch;
     if (started) { emit(); return; }
     started = true;
     loadLocal();
