@@ -1,6 +1,6 @@
 # 便籤／常用語工具 — 瀏覽器版
 
-對應規格書 `便籤工具_瀏覽器版_功能規格書_v4.32.md`。
+對應規格書 `便籤工具_瀏覽器版_功能規格書_v4.33.md`。
 
 自用的常用語／便籤工具。核心是把常用的句子存起來，點一下複製到剪貼簿，切到要用的視窗按 Ctrl+V 貼上。
 
@@ -9,7 +9,7 @@
 ## 怎麼放上 GitHub Pages
 
 1. 在 GitHub 建一個新的儲存庫，例如 `sticky-notes`，選 **Public**
-2. 把這個資料夾裡的**所有內容**（`index.html`、`css/`、`js/`、`README.md`）上傳進去
+2. 把這個資料夾裡的**所有內容**（`index.html`、`privacy.html`、`terms.html`、`css/`、`js/`、`README.md`）上傳進去
    - 網頁版做法：儲存庫頁面 → `Add file` → `Upload files` → 把檔案拖進去 → `Commit changes`
    - **注意要保留資料夾結構**，`css` 和 `js` 兩個資料夾要在，不能把檔案全部攤平
 3. 儲存庫 → `Settings` → 左邊 `Pages`
@@ -571,6 +571,8 @@
 
 ```
 index.html          主頁面
+privacy.html        隱私權政策（Google 登入的授權畫面會連到這一頁）
+terms.html          使用條款（同上）
 css/style.css       全部樣式，顏色全部集中在最上面的 CSS 變數
 js/data.js          資料模型、分頁暫存讀寫、舊版資料搬遷、匯出匯入、舊格式轉換
 js/vault.js         加密保管層：每張卡片一把金鑰、主密碼、復原金鑰
@@ -587,7 +589,7 @@ js/zxing-reader.js  第三方：zxing-wasm 3.1.4 讀取版（MIT，底層 zxing-
 js/jsqr.js          第三方：jsQR 1.4.0（Apache-2.0），上面那個讀不到或瀏覽器不支援時的備援，用到時才載入，不要手動編輯
 ```
 
-**一共十四個檔案。** 上傳時整個 `js` 資料夾一起拖就不會漏。
+**一共十六個檔案。** 上傳時整個 `js` 資料夾一起拖就不會漏。
 
 載入順序有相依性：`data.js` → `vault.js` → `clipboard.js` → `tabs.js` → `theme.js` → `pip.js` → `drive.js` → `app.js`。改 `index.html` 時不要調換。
 

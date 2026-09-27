@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<!-- 隱私權政策（v4.33）。Google 對外正式版的 OAuth 應用程式要求一定要有這一頁，
+     網址填在 Google Cloud Console 的「品牌」頁。內容必須跟程式實際行為一致：
+     權限範圍見 js/drive.js 的 SCOPE，對外請求只有 accounts.google.com 與 www.googleapis.com。
+     這一頁公開，用詞一律中性（資安文件第 4 節）。 -->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>隱私權政策｜便籤／常用語工具</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #e9e1db; --panel: #f9f6f3; --border: rgba(60, 40, 30, 0.12);
+    --text: #473d38; --text-dim: #6e625c; --accent: #655c74;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #58587e; --panel: #242938; --border: rgba(255, 255, 255, 0.13);
+      --text: #ffffff; --text-dim: #c8c8d1; --accent: #c3b3e6;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text-dim);
+    font: 15px/1.8 system-ui, -apple-system, "Segoe UI", "Microsoft JhengHei", "PingFang TC", sans-serif;
+  }
+  main {
+    max-width: 760px; margin: 32px auto; padding: 28px 32px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  }
+  h1 { color: var(--text); font-size: 22px; margin: 0 0 4px; }
+  h2 { color: var(--text); font-size: 16px; margin: 26px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+  p, ul { margin: 6px 0; }
+  ul { padding-left: 22px; }
+  b { color: var(--text); }
+  a { color: var(--accent); }
+  code { font-size: 13px; overflow-wrap: anywhere; }
+  .meta { font-size: 13px; }
+  .back { display: inline-block; margin-top: 24px; }
+  @media (max-width: 600px) { main { margin: 0; border-radius: 0; border-width: 0; padding: 20px 16px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>隱私權政策</h1>
+  <p class="meta">適用：便籤／常用語工具（<a href="./">https://ke-ro-ro.github.io/Post-1024/</a>）<br>生效日期：2026 年 9 月 27 日</p>
+
+  <h2>1. 這是什麼</h2>
+  <p>這是個人提供的免費網頁工具，用來整理便籤、常用語與連結。<b>沒有後端伺服器，也沒有公司在經營</b>；整個工具就是放在 GitHub Pages 上的網頁，在你的瀏覽器裡執行。</p>
+
+  <h2>2. 我們不收集你的資料</h2>
+  <p>你在工具裡輸入的內容只會放在兩個地方：</p>
+  <ul>
+    <li><b>瀏覽器這個分頁的暫存區</b>：關掉分頁或登出就清除。</li>
+    <li><b>你自己的 Google 雲端硬碟</b>中，這個工具專屬的隱藏資料夾（只有在你登入 Google 並使用雲端同步時）。</li>
+  </ul>
+  <p>工具的提供者<b>看不到任何使用者的內容</b>，也沒有地方可以收到這些內容。不同使用者之間的資料也互相看不到。</p>
+
+  <h2>3. 向 Google 要求的權限與用途</h2>
+  <ul>
+    <li><b>存取「這個應用程式專屬的雲端硬碟資料夾」</b>（<code>https://www.googleapis.com/auth/drive.appdata</code>）：只用來存放與讀取工具自己的同步檔。<b>碰不到你雲端硬碟裡的其他檔案</b>，這個資料夾在雲端硬碟畫面上也看不到。</li>
+    <li><b>電子郵件地址</b>（<code>email</code>）：只用來在同步面板上顯示目前登入的是哪個帳號，不會傳到任何其他地方。</li>
+  </ul>
+  <p>登入後取得的存取憑證<b>只放在瀏覽器的記憶體裡</b>，不寫進瀏覽器儲存空間，關掉分頁就消失。</p>
+
+  <h2>4. 不分享、不出售</h2>
+  <p>這個工具不會把從 Google API 取得的資料分享、轉交或出售給任何人，也不用於廣告。</p>
+  <p>本工具使用從 Google API 取得的資訊時，遵守 <a href="https://developers.google.com/terms/api-services-user-data-policy" rel="noopener">Google API 服務使用者資料政策</a>，包括其中的「有限使用」規定（Limited Use requirements）。</p>
+
+  <h2>5. Cookie、追蹤與第三方</h2>
+  <ul>
+    <li>沒有分析追蹤、沒有廣告，工具本身不設定任何 cookie。</li>
+    <li>唯一載入的外部程式是 Google 登入服務（<code>accounts.google.com</code>）；雲端同步直接連線 Google 的 API（<code>www.googleapis.com</code>）。其他所有程式都放在本網站上。</li>
+    <li>網站由 GitHub Pages 代管，GitHub 可能依其自身政策記錄一般的連線資訊（例如 IP 位址），這部分不在本工具控制範圍內。</li>
+  </ul>
+
+  <h2>6. 如何刪除你的資料</h2>
+  <ul>
+    <li><b>瀏覽器裡的資料</b>：在工具裡登出，或直接關掉分頁。</li>
+    <li><b>雲端硬碟裡的同步檔</b>：開啟 Google 雲端硬碟 → 右上角「設定」→「管理應用程式」→ 找到這個工具 →「選項」→「刪除隱藏的應用程式資料」。</li>
+    <li><b>取消授權</b>：到 Google 帳戶 →「安全性」→「具有帳戶存取權的第三方應用程式」，移除這個工具。</li>
+  </ul>
+
+  <h2>7. 政策更新</h2>
+  <p>這份政策如有修改，會更新本頁上方的生效日期。</p>
+
+  <h2>8. 聯絡方式</h2>
+  <p>有任何問題請寄信到 <a href="mailto:sticky-notes-help@googlegroups.com">sticky-notes-help@googlegroups.com</a>。</p>
+
+  <a class="back" href="./">← 回到工具</a>　<a class="back" href="terms.html">使用條款</a>
+</main>
+</body>
+</html>
