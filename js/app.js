@@ -1011,38 +1011,72 @@
     });
   }
 
-  /* QR 解碼函式庫（js/jsqr.js，Apache-2.0）放在自己的儲存庫，
-     跟簡繁字典同一個做法：不走 CDN，第一次貼截圖時才載入。 */
-  var qrLoad = null;
-  function loadJsQR() {
-    if (window.jsQR) return Promise.resolve(window.jsQR);
-    if (qrLoad) return qrLoad;
-    qrLoad = new Promise(function (ok, fail) {
+  /* QR 解碼函式庫放在自己的儲存庫，跟簡繁字典同一個做法：不走 CDN，第一次貼截圖時才載入。
+     主力是 js/zxing-reader.js（zxing-wasm，MIT；WebAssembly 內嵌在檔案裡），
+     讀不到或瀏覽器不支援 WebAssembly 時，退回 js/jsqr.js（Apache-2.0）。
+     jsQR 對格子很密的 QR 很挑截圖大小：同一張圖放大 1.25 倍就可能讀不到（規格書 11.61）。 */
+  var qrLibs = {};
+  function loadScriptOnce(src, globalName) {
+    if (window[globalName]) return Promise.resolve(window[globalName]);
+    if (qrLibs[src]) return qrLibs[src];
+    qrLibs[src] = new Promise(function (ok, fail) {
       var el = document.createElement('script');
-      el.src = 'js/jsqr.js';
-      el.onload = function () { window.jsQR ? ok(window.jsQR) : fail(new Error('載入失敗')); };
-      el.onerror = function () { qrLoad = null; fail(new Error('載入失敗')); };
+      el.src = src;
+      el.onload = function () { window[globalName] ? ok(window[globalName]) : fail(new Error('載入失敗')); };
+      el.onerror = function () { qrLibs[src] = null; fail(new Error('載入失敗')); };
       document.head.appendChild(el);
     });
-    return qrLoad;
+    return qrLibs[src];
+  }
+
+  /** 主力：zxing。讀不到回傳 ''；載入失敗或不支援 WebAssembly 時丟錯，交給備援 */
+  function readQrZxing(file) {
+    if (typeof WebAssembly !== 'object') return Promise.reject(new Error('不支援 WebAssembly'));
+    return loadScriptOnce('js/zxing-reader.js', 'ZXingWASM').then(function (Z) {
+      // 預設的黑白判斷看局部平均，遇到「模糊＋壓縮」的截圖會失手；
+      // 讀不到時依序改看整張圖的明暗分布、固定門檻，各再試一次
+      var ways = ['LocalAverage', 'GlobalHistogram', 'FixedThreshold'];
+      function attempt(i) {
+        if (i >= ways.length) return '';
+        return Z.readBarcodes(file, { formats: ['QRCode'], tryHarder: true, maxNumberOfSymbols: 1, binarizer: ways[i] })
+          .then(function (rs) {
+            var r = rs && rs[0];
+            return r && r.isValid && r.text ? r.text : attempt(i + 1);
+          });
+      }
+      return attempt(0);
+    });
+  }
+
+  /** 備援：jsQR。同一張圖換幾種大小各試一次，任一次讀到就停 */
+  function readQrJsQR(file) {
+    return loadScriptOnce('js/jsqr.js', 'jsQR').then(function (jsQR) {
+      return createImageBitmap(file).then(function (bmp) {
+        var big = Math.max(bmp.width, bmp.height);
+        var scales = [1, 1.5, 2, 0.75, 1.25];
+        for (var i = 0; i < scales.length; i++) {
+          // 放大後超過 2400 就跳過，太大的截圖原尺寸那次也先縮到 2400 以內
+          var s = Math.min(scales[i], 2400 / big);
+          if (i > 0 && s !== scales[i]) continue;
+          var w = Math.max(1, Math.round(bmp.width * s));
+          var h = Math.max(1, Math.round(bmp.height * s));
+          var cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          var g = cv.getContext('2d');
+          g.imageSmoothingQuality = 'high';
+          g.drawImage(bmp, 0, 0, w, h);
+          var r = jsQR(g.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'attemptBoth' });
+          if (r && r.data) return r.data;
+        }
+        return '';
+      });
+    });
   }
 
   /** 從圖片檔讀出 QR code 裡的文字。讀不到回傳 '' */
   function readQrFromFile(file) {
-    return loadJsQR().then(function (jsQR) {
-      return createImageBitmap(file).then(function (bmp) {
-        // 太大的截圖先縮到 1600 以內，解碼快很多，QR 也還夠清楚
-        var scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
-        var w = Math.max(1, Math.round(bmp.width * scale));
-        var h = Math.max(1, Math.round(bmp.height * scale));
-        var cv = document.createElement('canvas');
-        cv.width = w; cv.height = h;
-        var g = cv.getContext('2d');
-        g.drawImage(bmp, 0, 0, w, h);
-        var img = g.getImageData(0, 0, w, h);
-        var r = jsQR(img.data, w, h, { inversionAttempts: 'attemptBoth' });
-        return r && r.data ? r.data : '';
-      });
+    return readQrZxing(file).catch(function () { return ''; }).then(function (text) {
+      return text || readQrJsQR(file);
     });
   }
 
