@@ -2232,6 +2232,11 @@
 
   var tpHidden = {};       // 按眼睛遮起來的卡片（只在記憶體；鎖上時清掉）
   var tpLive = [];         // 畫面上正在跑的列：{ tabId, entry, row, codeEl, ringEl }
+  /* 帳號多的時候卡片最多露出幾筆，其餘在清單裡捲動（9/27 使用者要求）。
+     主畫面才限制；置頂小視窗本身就是一個可以拉大縮小的視窗，
+     裡面再套一層捲動條只會多一個要對準的地方。 */
+  var TP_VISIBLE = 6;
+  var tpScroll = {};       // 各卡片清單捲到哪裡（重畫時接回去，不然每次存檔都跳回頂端）
   var tpTimer = null;
   var tpCache = {};        // 'entryId:counter' → 驗證碼，同一個 30 秒內不重算
   var TP_SOON = 5;         // 剩幾秒算「快過期」
@@ -2348,6 +2353,28 @@
       body.appendChild(hint);
     }
 
+    /* 所有帳號列包在一個清單容器裡，超過 TP_VISIBLE 筆就在容器裡捲動。
+       高度用量的：名稱與數字的行高跟著字型走（Windows 與沙盒不同），
+       寫死像素會切在半列上。量不到（卡片還沒掛上畫面）時用樣式表的備用值。 */
+    var list = document.createElement('div');
+    list.className = 'tp-list';
+    var scrollable = !RO && entries.length > TP_VISIBLE;
+    if (scrollable) {
+      list.classList.add('tp-scroll');
+      list.addEventListener('scroll', function () { tpScroll[tab.id] = list.scrollTop; });
+      requestAnimationFrame(function () {
+        var rows = list.querySelectorAll('.tp-row');
+        var last = rows[TP_VISIBLE - 1];
+        if (!last || !last.offsetHeight) return;
+        // 第六列的下緣（含分隔線）剛好是容器底，第七列從捲動開始
+        list.style.maxHeight = (last.offsetTop - rows[0].offsetTop + last.offsetHeight) + 'px';
+        if (tpScroll[tab.id]) list.scrollTop = tpScroll[tab.id];
+      });
+    } else {
+      delete tpScroll[tab.id];
+    }
+    body.appendChild(list);
+
     entries.forEach(function (entry) {
       var row = document.createElement('div');
       row.className = 'tp-row';
@@ -2412,7 +2439,7 @@
         if (live.code) Clip.copy(live.code, code, entry.name || '驗證碼');
       });
 
-      body.appendChild(row);
+      list.appendChild(row);
       tpLive.push(live);
       tpPaint(live, Date.now());
     });
@@ -2420,7 +2447,8 @@
     if (entries.length) {
       var tip = document.createElement('div');
       tip.className = 'tp-hint';
-      tip.textContent = tpHidden[tab.id] ? '點數字就會重新顯示' : '點數字就複製';
+      tip.textContent = (tpHidden[tab.id] ? '點數字就會重新顯示' : '點數字就複製') +
+        (scrollable ? ' · 共 ' + entries.length + ' 個，往下捲看其他' : '');
       body.appendChild(tip);
       tpEnsureTimer();
     }
