@@ -2440,3 +2440,6 @@ textarea,
 .help-row em { font-style: normal; color: var(--text-faint); font-size: 12px; padding-top: 1px; }
 .help-qa { margin: 6px 0; }
 .help-qa b { display: block; }
+/* 說明頁最下面的隱私權政策與使用條款連結（v4.33） */
+.help-links { margin: 18px 0 0; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12.5px; text-align: center; }
+.help-links a { color: var(--accent); }
