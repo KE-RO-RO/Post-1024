@@ -3821,6 +3821,10 @@
     sec('還沒有的功能');
     h.push('<p class="help-p">全域鎖定（離開座位時把整個工具鎖起來）、表格／參考清單。</p>');
 
+    // Google 要求正式版應用程式的首頁找得到隱私權政策（v4.33）。新分頁開，不打斷手上的事
+    h.push('<p class="help-links"><a href="privacy.html" target="_blank" rel="noopener">隱私權政策</a>' +
+      '　·　<a href="terms.html" target="_blank" rel="noopener">使用條款</a></p>');
+
     h.push('</div>');
 
     showModal({
