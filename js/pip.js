@@ -6,8 +6,10 @@
 
    幾個必須知道的限制：
 
-   1. 瀏覽器同時只允許存在一個 PiP 視窗。所以是「換一張卡片」，
-      不是「再開一個」。
+   1. 瀏覽器同時只允許存在一個 PiP 視窗。所以 v4.35 起是「一個視窗放好幾張」：
+      主視窗按彈出鈕是把那張「加進」小視窗，小視窗上面一排卡片名稱切換，
+      名稱旁的 ✕ 把那張移出（使用者 10/02 看過 A1／A2 示意圖選了 A1）。
+      不置頂視窗也是同一套，兩種視窗同時只留一個。
    2. 只有 Chromium 系（Chrome、Edge）有這個 API。不支援時彈出鈕不常駐，
       改由卡片的 ⋯ 選單顯示停用項目並說明原因。
    3. 視窗位置由瀏覽器決定，程式碰不到；大小可以指定，所以我們把它記起來。
@@ -27,7 +29,8 @@
   'use strict';
 
   var win = null;        // 小視窗的 window，沒開時是 null
-  var curId = null;      // 目前顯示的卡片 id
+  var ids = [];          // 放在小視窗裡的卡片（v4.35，A1 名稱切換），順序就是名稱那一排的順序
+  var curId = null;      // 目前顯示的那一張
   var mode = 'pip';      // 'pip' = 置頂（Document PiP）、'win' = 不置頂（一般彈出視窗）
   var hotkeys = {};      // 小視窗自己的複製鍵對照表
   var ui = {};           // 由 app.js 注入的東西
@@ -50,8 +53,9 @@
     return win && !win.closed ? mode : null;
   }
 
+  /** 這張卡片在不在小視窗裡（不一定是正在顯示的那一張） */
   function isOpen(tab) {
-    return !!win && !win.closed && !!tab && tab.id === curId;
+    return !!win && !win.closed && !!tab && ids.indexOf(tab.id) >= 0;
   }
 
   function setUI(obj) { ui = obj || {}; }
@@ -68,6 +72,7 @@
     // 從資料層讀，不從主視窗的 DOM 讀——資料層才是準的，不必擔心誰先重繪
     d.documentElement.setAttribute('data-theme', th.mode === 'light' ? 'light' : 'dark');
     d.documentElement.setAttribute('data-card-style', th.cardStyle === 'full' ? 'full' : 'line');
+    d.documentElement.setAttribute('data-font', DB.uiFont());
     // 顯示大小跟主視窗一致
     var z = DB.uiZoom();
     d.body.style.zoom = z === 1 ? '' : String(z);
@@ -215,10 +220,10 @@
     editNoteItem: noop,
     editTotp: noop,
     clockSkew: function () { return ui.clockSkew ? ui.clockSkew() : null; },
-    attachLinkDrag: noop,
+    // TOTP 卡的名稱搜尋：小視窗裡也要能打字（使用者 10/01 要的），比對規則跟主視窗同一套
+    textMatch: function (s, q) { return ui.textMatch ? ui.textMatch(s, q) : true; },
     editPhrase: noop,
     editDueItem: noop,
-    editLink: noop,
     openLinks: function (list, pick) { ui.openLinks(list, pick); },
     showPopupHelp: noop,
     openCard: function (tab) { askPassword(tab); },
@@ -227,6 +232,7 @@
     editPrivate: noop,
     pipSupported: supported,
     isPipped: isOpen,
+    isPipActive: isActive,
     pipMode: currentMode,
     togglePip: noop,
     togglePipWindow: noop
@@ -241,16 +247,73 @@
     '<path d="M9.2 3.4h5.6l-1 5.2 2.8 2.8v1.8H7.4v-1.8l2.8-2.8-1-5.2Z"/>' +
     '<path d="M12 13.2V21"/></svg>';
 
-  function render() {
+  /** 名稱那一排（A1）：點名稱切換，✕ 把那張移出。兩張以上才出現——只有一張時就是整個視窗 */
+  function renderTabsBar(root) {
+    if (ids.length < 2) return;
+    var d = win.document;
+    var bar = d.createElement('div');
+    bar.className = 'pip-tabs';
+    ids.forEach(function (id) {
+      var t = DB.findTab(id);
+      if (!t) return;
+      var chip = d.createElement('div');
+      chip.className = 'pip-tab' + (id === curId ? ' on' : '');
+      chip.dataset.tabId = id;
+
+      // 名稱與 ✕ 是兩顆按鈕：點名稱是切換、點 ✕ 是移出，不在同一塊區域（11.1）
+      var nm = d.createElement('button');
+      nm.className = 'pip-tab-name';
+      nm.textContent = t.title || '未命名';
+      nm.title = t.title || '未命名';
+      nm.addEventListener('click', function () {
+        if (curId === id) return;
+        curId = id;
+        render();
+      });
+      chip.appendChild(nm);
+
+      var x = d.createElement('button');
+      x.className = 'pip-tab-x';
+      x.textContent = '✕';
+      x.title = '從小視窗移出（卡片本身不會刪掉）';
+      x.addEventListener('click', function (e) {
+        e.stopPropagation();
+        remove(id);
+      });
+      chip.appendChild(x);
+      bar.appendChild(chip);
+    });
+    root.appendChild(bar);
+    // 正在看的那一張捲進畫面（名稱多的時候這一排會橫向捲動）
+    var on = bar.querySelector('.pip-tab.on');
+    if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  /**
+   * @param {object} opt { quiet }：quiet 是「主視窗有不重畫的修改」排過來的（v4.35）。
+   *   這時候小視窗如果正有焦點、游標在輸入框裡（例如 TOTP 的搜尋框），就先不重畫——
+   *   重建元素會把正在打的字與焦點吃掉（11.20）。下一次重畫時再跟上。
+   */
+  function render(opt) {
     if (!win || win.closed) return;
+    if (opt && opt.quiet) {
+      try {
+        var ae = win.document.activeElement;
+        if (win.document.hasFocus() && ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+      } catch (e) { /* 讀不到就照常重畫 */ }
+    }
+    // 被刪掉的卡片拿掉；一張都不剩就關視窗
+    ids = ids.filter(function (id) { return !!DB.findTab(id); });
+    if (!ids.length) { close(); if (ui.onChange) ui.onChange(); return; }
+    if (ids.indexOf(curId) < 0) curId = ids[0];
     var tab = DB.findTab(curId);
-    if (!tab) { close(); return; }
 
     syncTheme();
     var root = win.document.getElementById('pipRoot');
     if (!root) return;
     root.innerHTML = '';
     hotkeys = {};
+    renderTabsBar(root);
     var card = Tabs.renderCard(tab, pipCtx);
     root.appendChild(card);
 
@@ -297,12 +360,15 @@
      失去焦點就把展開的私人項目收回去，只留名稱清單。
      卡片本身的鎖定狀態不動，回來點一下就展開，不必重打密碼。 */
   function onBlur() {
-    if (!curId) return;
-    var tab = DB.findTab(curId);
-    // TOTP 卡不在失焦時遮：使用者工作時一直在別的視窗輸入驗證碼（v4.26 改成按眼睛手動遮）
-    if (!tab || tab.type !== 'private') return;
-    Tabs.collapsePrivate(curId);
-    render();
+    if (!ids.length) return;
+    // TOTP 卡不在失焦時遮：使用者工作時一直在別的視窗輸入驗證碼（v4.26 改成按眼睛手動遮）。
+    // 連結收藏（v4.35）展開的那幾筆收回去，放在小視窗裡的每一張都收
+    var any = false;
+    ids.forEach(function (id) {
+      var t = DB.findTab(id);
+      if (t && t.type === 'private') { Tabs.collapsePrivate(id); any = true; }
+    });
+    if (any) render();
   }
 
   function rememberSize() {
@@ -350,6 +416,7 @@
 
   function onWinGone() {
     win = null;
+    ids = [];
     curId = null;
     hotkeys = {};
     if (ui.onChange) ui.onChange();
@@ -362,7 +429,7 @@
    *        動作，requestWindow 就會被拒。這時候要把原本那個視窗開回來，
    *        不然使用者會落到「兩個都沒有」的狀態。
    */
-  function openPip(tab, onFail) {
+  function openPip(tab, onFail, list) {
     if (!supported()) { if (onFail) onFail(); return; }
     var size = DB.pipSize();
     window.documentPictureInPicture.requestWindow({
@@ -371,6 +438,7 @@
     }).then(function (w) {
       win = w;
       mode = 'pip';
+      ids = withTab(list, tab.id);
       curId = tab.id;
       prepareDoc(w);
       render();
@@ -386,7 +454,7 @@
    * 會被彈出視窗攔截擋掉（跟連結卡一次開多個分頁是同一件事），
    * 擋掉時 window.open 回傳 null——這裡沒有用 noopener，回傳值才判斷得準（11.7）。
    */
-  function openWindowed(tab, from) {
+  function openWindowed(tab, from, list) {
     var size = DB.pipSize();
     var feat = 'popup=yes,width=' + size.w + ',height=' + size.h;
     var w = null;
@@ -410,6 +478,7 @@
 
     win = w;
     mode = 'win';
+    ids = withTab(list, tab.id);
     curId = tab.id;
     prepareDoc(w);
     render();
@@ -417,13 +486,23 @@
     if (ui.onChange) ui.onChange();
   }
 
+  /** 把 id 加到清單最後（已經在裡面就不動），回傳新的清單 */
+  function withTab(list, id) {
+    var out = (list || []).filter(function (x) { return x !== id && !!DB.findTab(x); });
+    var at = (list || []).indexOf(id);
+    if (at >= 0) out.splice(Math.min(at, out.length), 0, id);
+    else out.push(id);
+    return out;
+  }
+
   function open(tab, wantMode) {
     var want = wantMode === 'win' ? 'win' : 'pip';
     if (want === 'pip' && !supported()) return;
 
-    // 已經開著而且是同一種視窗：直接換內容。
+    // 已經開著而且是同一種視窗：加進去並切到這一張（v4.35，不是換掉）。
     // PiP 同時只准存在一個，重新 requestWindow 會關掉舊的再開，畫面會閃
     if (win && !win.closed && mode === want) {
+      ids = withTab(ids, tab.id);
       curId = tab.id;
       render();
       win.focus();
@@ -431,11 +510,24 @@
       return;
     }
 
-    // 換另一種視窗：先收掉舊的（同時只留一個小視窗，不論哪一種）
+    // 換另一種視窗：先收掉舊的（同時只留一個小視窗，不論哪一種），
+    // 裡面原本放的那幾張一起帶過去
+    var carry = (win && !win.closed) ? ids.slice() : [];
     if (win && !win.closed) close();
 
-    if (want === 'win') openWindowed(tab);
-    else openPip(tab);
+    if (want === 'win') openWindowed(tab, null, carry);
+    else openPip(tab, null, carry);
+  }
+
+  /** 從小視窗移出一張（v4.35）。最後一張移出就關掉視窗 */
+  function remove(id) {
+    var at = ids.indexOf(id);
+    if (at < 0) return;
+    ids.splice(at, 1);
+    if (!ids.length) { close(); if (ui.onChange) ui.onChange(); return; }
+    if (curId === id) curId = ids[Math.min(at, ids.length - 1)];
+    render();
+    if (ui.onChange) ui.onChange();
   }
 
   function close() {
@@ -444,18 +536,36 @@
       win.close();
     }
     win = null;
+    ids = [];
     curId = null;
     hotkeys = {};
   }
 
+  /* 主視窗的彈出鈕：不在小視窗裡 → 加進去；已經在同一種視窗裡 → 移出。
+     在另一種視窗裡 → 整個換成這一種（裡面的卡片一起帶過去） */
   function toggle(tab) {
-    if (isOpen(tab) && mode === 'pip') { close(); if (ui.onChange) ui.onChange(); return; }
+    if (isOpen(tab) && mode === 'pip') { pressSame(tab); return; }
     open(tab, 'pip');
   }
 
   function toggleWindowed(tab) {
-    if (isOpen(tab) && mode === 'win') { close(); if (ui.onChange) ui.onChange(); return; }
+    if (isOpen(tab) && mode === 'win') { pressSame(tab); return; }
     open(tab, 'win');
+  }
+
+  /* 已經在同一種小視窗裡：正在顯示的那張 → 移出；放在裡面但沒在顯示 → 切到它
+     （不然要看它就得先到小視窗上面那一排找名稱） */
+  function pressSame(tab) {
+    if (curId === tab.id) { remove(tab.id); return; }
+    curId = tab.id;
+    render();
+    try { win.focus(); } catch (e) { /* 忽略 */ }
+    if (ui.onChange) ui.onChange();
+  }
+
+  /** 這張是不是小視窗正在顯示的那一張 */
+  function isActive(tab) {
+    return isOpen(tab) && tab.id === curId;
   }
 
   /** 小視窗裡的圖釘：當場換另一種視窗，顯示的卡片不變。 */
@@ -465,9 +575,10 @@
 
     if (mode === 'pip') {
       var pipWin = (win && !win.closed) ? win : null;
-      // 先開新的再關舊的：開不起來時置頂視窗還在，不會兩個都沒有
+      // 先開新的再關舊的：開不起來時置頂視窗還在，不會兩個都沒有。放在裡面的卡片一起帶過去
       var prevWin = win;
-      openWindowed(tab, pipWin);
+      var prevIds = ids.slice();
+      openWindowed(tab, pipWin, prevIds);
       if (win !== prevWin && pipWin) {
         try { pipWin.removeEventListener('pagehide', onWinGone); } catch (e) { /* 忽略 */ }
         try { pipWin.close(); } catch (e) { /* 忽略 */ }
@@ -495,8 +606,11 @@
     windowedSupported: windowedSupported,
     mode: currentMode,
     isOpen: isOpen,
+    isActive: isActive,
     open: open,
     close: close,
+    remove: remove,
+    ids: function () { return ids.slice(); },
     toggle: toggle,
     toggleWindowed: toggleWindowed,
     switchMode: switchMode,

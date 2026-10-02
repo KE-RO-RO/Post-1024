@@ -605,9 +605,13 @@
       seenLogin = false;
       /* 最後同步時間也清掉。資料都不留了，留著它沒有意義，而且下次登入
          本機是空的，決策表會直接下載，不會跳衝突。 */
-      clearLocal();
       Vault.lockAll();          // 記憶體裡的金鑰與明文
       DB.wipeLocal();           // 分頁暫存裡的資料 → 回到空白工具
+      /* wipeLocal 會發 onChange → scheduleAuto 又立起 dirty、又把同步狀態寫回分頁暫存，
+         所以清同步狀態要排在它後面（v4.35 修正；以前 clearLocal 在前面，登出後分頁暫存裡
+         留著一筆「有變更還沒上傳」的狀態。switchAccount 早就是這個順序） */
+      st.dirty = false;
+      clearLocal();
       emit();
       return 'done';
     }

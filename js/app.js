@@ -373,6 +373,8 @@
     var th = DB.theme();
     document.documentElement.dataset.theme = th.mode;
     document.documentElement.dataset.cardStyle = th.cardStyle;
+    // 介面字型（v4.35）。只是換字型順序，全部是電腦內建的字型
+    document.documentElement.dataset.font = DB.uiFont();
     // 自訂配色是另一段 <style>；面板開著的話，主題換了面板也跟著換
     if (window.Theme) Theme.sync();
   }
@@ -436,7 +438,7 @@
     pop.dataset.tabId = tab.id;
 
     // 第一列：跟隨類型，旁邊寫出這個類型目前的預設色
-    var def = DB.TYPE_COLOR[tab.type] || null;
+    var def = DB.typeColor(tab);
     var follow = document.createElement('div');
     follow.className = 'color-pop-follow';
     var followRow = swatchRow([{ key: null, name: '跟隨類型' }], tab.color || null, choose);
@@ -526,6 +528,19 @@
       '卡片顏色預設跟著類型走，想換可以點卡片標題列上的小色點。';
     wrap.appendChild(hint);
 
+    /* 介面字型（v4.35，使用者 10/01 要的）。微軟正黑體沒有「录、码」這些簡體字，
+       繁簡混排時那幾個字會變成別套字型。三個都是電腦內建的，不從網路載字型 */
+    var lf = document.createElement('label');
+    lf.textContent = '介面字型';
+    wrap.appendChild(lf);
+    wrap.appendChild(segControl([['jhenghei', '正黑體'], ['yahei', '雅黑體'], ['system', '系統預設']],
+      DB.uiFont(), function (v) { DB.setUiFont(v); }));
+    var fh = document.createElement('div');
+    fh.className = 'field-hint';
+    fh.textContent = '正黑體：繁體字好看，簡體字缺字的部分改用雅黑體補。' +
+      '雅黑體：繁簡一致，整段簡體也不會有幾個字長得不一樣。會跟著雲端同步。';
+    wrap.appendChild(fh);
+
     // 配色套組的快速切換：預設亮色、預設暗色、存過的套組
     var l3 = document.createElement('label');
     l3.textContent = '配色套組';
@@ -577,8 +592,10 @@
      ============================================================ */
 
   /**
-   * 倒數任務的新增與編輯。名稱、日期、時間三欄一起處理。
+   * 待辦（v4.35 起倒數併進來）的新增與編輯。名稱、日期、時間三欄一起處理，
+   * 日期與時間都可以留空。
    * item 給 null 就是新增——新增直接開這個彈窗，不先生一列空白（同 5.1 的做法）。
+   * 名稱欄按 Enter 直接存：不設日期的待辦打完字就好，不必再去點按鈕。
    */
   function editDueItem(tab, item) {
     var isNew = !item;
@@ -587,7 +604,7 @@
     var nameInput = labeledInput(wrap, '任務名稱', 'text',
       isNew ? '' : (item.text || ''), '這件事要做什麼');
 
-    var dateInput = labeledInput(wrap, '日期（留空就是未定日期）', 'date',
+    var dateInput = labeledInput(wrap, '日期（可留空，有日期就會倒數）', 'date',
       isNew ? '' : (item.due || ''), '');
     // 點文字區也要跳日曆，不是只有右邊那個小圖示（11.8）
     dateInput.addEventListener('click', function () {
@@ -601,8 +618,30 @@
 
     var hint = document.createElement('div');
     hint.className = 'field-hint';
-    hint.textContent = '沒填時間就代表「那一天」，會在當天結束後才算過期。';
+    hint.textContent = '有日期的排在上面、會倒數，到期變紅；沒填時間就代表「那一天」，' +
+      '當天結束後才算過期。沒日期的就是一般待辦，排在下面。';
     wrap.appendChild(hint);
+
+    function save() {
+      var target = item;
+      if (isNew) {
+        // 新的一筆排在最後（沒日期那一組照手動順序，所以是放在最下面）
+        var maxOrder = tab.items.reduce(function (m, x) { return Math.max(m, x.order || 0); }, -1);
+        target = { id: DB.uid(), text: '', done: false, due: '', time: '', order: maxOrder + 1 };
+        tab.items.push(target);
+      }
+      target.text = nameInput.value.trim();
+      target.due = DB.normalizeDue(dateInput.value);
+      // 沒有日期的話時間沒有意義，一併清掉，避免留下看不到卻還在檔案裡的值
+      target.time = target.due ? DB.normalizeTime(timeInput.value) : '';
+      tab.updatedAt = DB.nowIso();
+      closeModal();
+      DB.touch();
+    }
+
+    nameInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); save(); }
+    });
 
     showModal({
       title: isNew ? '新增任務' : '編輯任務',
@@ -611,24 +650,7 @@
       noEscape: true,
       buttons: [
         { text: '取消', onClick: closeModal },
-        {
-          text: '儲存',
-          cls: 'btn-primary',
-          onClick: function () {
-            var target = item;
-            if (isNew) {
-              target = { id: DB.uid(), text: '', done: false, due: '', time: '', order: tab.items.length };
-              tab.items.push(target);
-            }
-            target.text = nameInput.value.trim();
-            target.due = DB.normalizeDue(dateInput.value);
-            // 沒有日期的話時間沒有意義，一併清掉，避免留下看不到卻還在檔案裡的值
-            target.time = target.due ? DB.normalizeTime(timeInput.value) : '';
-            tab.updatedAt = DB.nowIso();
-            closeModal();
-            DB.touch();
-          }
-        }
+        { text: '儲存', cls: 'btn-primary', onClick: save }
       ]
     });
     nameInput.focus();
@@ -793,64 +815,6 @@
       onClose: stopRecord,
       buttons: [
         { text: '取消', onClick: function () { stopRecord(); closeModal(); } },
-        { text: '儲存', cls: 'btn-primary', onClick: save }
-      ]
-    });
-  }
-
-  function editLink(tab, link) {
-    var wrap = document.createElement('div');
-
-    var l1 = document.createElement('label');
-    l1.textContent = '名稱';
-    var nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.value = link.name || '';
-    nameInput.placeholder = '例：Yahoo';
-
-    var l2 = document.createElement('label');
-    l2.textContent = '網址（一行一條，多條會隨機開其中一條）';
-    var urlInput = document.createElement('textarea');
-    urlInput.rows = 5;
-    urlInput.value = (link.urls || []).join('\n');
-    urlInput.placeholder = 'https://example.com\nhttps://example.org';
-
-    var hint = document.createElement('div');
-    hint.className = 'field-hint';
-    hint.textContent = '只填一條就是一般連結。填多條的話，每次開啟隨機挑其中一條。';
-
-    wrap.appendChild(l1);
-    wrap.appendChild(nameInput);
-    wrap.appendChild(l2);
-    wrap.appendChild(urlInput);
-    wrap.appendChild(hint);
-
-    function save() {
-      link.name = nameInput.value.trim();
-      link.urls = urlInput.value
-        .split('\n')
-        .map(function (u) { return u.trim(); })
-        .filter(function (u, i, arr) { return u && arr.indexOf(u) === i; });
-      tab.updatedAt = DB.nowIso();
-      closeModal();
-      DB.touch();
-    }
-
-    nameInput.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); urlInput.focus(); }
-      e.stopPropagation();
-    });
-    urlInput.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); save(); }
-      e.stopPropagation();
-    });
-
-    showModal({
-      title: '編輯連結',
-      body: wrap,
-      noEscape: true,
-      buttons: [
-        { text: '取消', onClick: closeModal },
         { text: '儲存', cls: 'btn-primary', onClick: save }
       ]
     });
@@ -1263,9 +1227,11 @@
     var grid = document.createElement('div');
     grid.className = 'type-grid';
 
+    /* v4.35：連結收藏（原本的連結卡＋私人卡片）。加密是整張卡片的開關，
+       建立時還是二選一、不給預設值（9.11 的理由不變）；之後可以從 ⋯ 選單互轉 */
     [
-      ['enc', '加密保存', '需要主密碼才看得到，存在瀏覽器裡的是密文'],
-      ['plain', '不加密', '直接看得到，內容以明文存放。適合不需要保護的記事']
+      ['plain', '不加密', '一般的網址清單，直接看得到。也可以記帳號密碼，但存的是明文'],
+      ['enc', '加密', '需要主密碼才看得到，存的是密文。適合放帳號密碼']
     ].forEach(function (m) {
       var b = document.createElement('button');
       b.className = 'type-opt';
@@ -1276,7 +1242,7 @@
       } else {
         b.addEventListener('click', function () {
           closeModal();
-          promptModal('新增私人卡片', '卡片標題', '未命名', function (title) {
+          promptModal('新增連結收藏', '卡片標題', '連結收藏', function (title) {
             var tab = DB.addTab('private', state.currentCategoryId, title);
             tab.encrypted = (m[0] === 'enc');
             DB.touch();
@@ -1288,9 +1254,17 @@
       grid.appendChild(b);
     });
 
+    var tip = document.createElement('div');
+    tip.className = 'field-hint';
+    tip.style.margin = '10px 0 0';
+    tip.textContent = '之後可以從卡片的 ⋯ 選單改成加密或不加密。';
+    var box = document.createElement('div');
+    box.appendChild(grid);
+    box.appendChild(tip);
+
     showModal({
-      title: '這張卡片要加密嗎',
-      body: grid,
+      title: '這張連結收藏要加密嗎',
+      body: box,
       buttons: [{ text: '取消', onClick: closeModal }]
     });
   }
@@ -1751,88 +1725,201 @@
     });
   }
 
+  /**
+   * 連結收藏的一筆：新增（item 為 null）或編輯（v4.35）。
+   * 名稱、好幾條網址（每條一格網址、一格備註）、帳號、密碼、備忘，後三樣選填。
+   * 網址那一段是一列一條，不是一個大框：每條要配一個備註，一個框裡寫
+   * 「網址 空格 備註」使用者得自己記規則（11.37）。從別處整串貼進來
+   * （一行一條）時自動拆成好幾列，跟以前的連結卡一樣好貼。
+   */
   function editPrivate(tab, item) {
     var isNew = !item;
-    var kind = (item && item.kind === 'memo') ? 'memo' : 'info';
     var wrap = document.createElement('div');
 
-    /* 型別只影響中間那段欄位。名稱與網址兩種都有——
-       名稱是摺疊時唯一露出來的東西，網址驅動鏈條鈕。 */
-    var kl = document.createElement('label');
-    kl.textContent = '型別';
-    wrap.appendChild(kl);
-
-    var seg = document.createElement('div');
-    seg.className = 'kind-seg';
-    wrap.appendChild(seg);
-
-    var infoBox = document.createElement('div');
-    var memoBox = document.createElement('div');
-
     var name = labeledInput(wrap, '名稱', 'text', item && item.name, '方便你辨認的名稱');
-    var url  = labeledInput(wrap, '網址（可留空）', 'text', item && item.url, 'https://');
-    wrap.appendChild(infoBox);
-    wrap.appendChild(memoBox);
 
-    var user = labeledInput(infoBox, '帳號', 'text', item && item.user, '');
-    var pass = labeledInput(infoBox, '密碼', 'text', item && item.pass, '');
+    var ul = document.createElement('label');
+    ul.textContent = '網址（點名稱開第一條，可以拖 ⠿ 換順序）';
+    wrap.appendChild(ul);
+    var urlBox = document.createElement('div');
+    urlBox.className = 'lk-urls';
+    wrap.appendChild(urlBox);
+
+    var dragUrlRow = null;
+
+    function addUrlRow(url, note, focus, after) {
+      var row = document.createElement('div');
+      row.className = 'lk-url-row';
+
+      var grip = document.createElement('span');
+      grip.className = 'gen-grip';
+      grip.textContent = '⠿';
+      grip.title = '按住拖曳可調整順序';
+      grip.addEventListener('mousedown', function (e) { e.stopPropagation(); row.draggable = true; });
+      grip.addEventListener('mouseup', function () { row.draggable = false; });
+      row.appendChild(grip);
+
+      var u = document.createElement('input');
+      u.type = 'text';
+      u.className = 'lk-url-in';
+      u.value = url || '';
+      u.placeholder = 'https://';
+      u.spellcheck = false;
+      row.appendChild(u);
+
+      var n = document.createElement('input');
+      n.type = 'text';
+      n.className = 'lk-note-in';
+      n.value = note || '';
+      n.placeholder = '備註（選填）';
+      row.appendChild(n);
+
+      row.appendChild(Tabs.iconBtn('✕', '拿掉這一條', function () {
+        row.remove();
+        if (!urlBox.children.length) addUrlRow('', '', true);
+      }, 'danger-btn'));
+
+      [u, n].forEach(function (el) {
+        el.addEventListener('keydown', function (e) {
+          e.stopPropagation();
+          // Enter：在網址格跳到備註，在備註格開下一條
+          if (e.key === 'Enter' && !e.isComposing) {
+            e.preventDefault();
+            if (el === u) n.focus();
+            else {
+              var next = row.nextElementSibling;
+              if (next) next.querySelector('.lk-url-in').focus();
+              else addUrlRow('', '', true);
+            }
+          }
+        });
+      });
+
+      /* 一次貼好幾行（例如從以前的清單複製過來）：一行一條，自動拆成好幾列 */
+      u.addEventListener('paste', function (e) {
+        var t = e.clipboardData && e.clipboardData.getData('text');
+        if (!t || !/\n/.test(t.trim())) return;
+        e.preventDefault();
+        var lines = t.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean);
+        u.value = lines.shift() || '';
+        var at = row;
+        lines.forEach(function (x) { at = addUrlRow(x, '', false, at); });
+      });
+
+      row.addEventListener('dragstart', function (e) {
+        dragUrlRow = row;
+        row.classList.add('dragging');
+        try { e.dataTransfer.setData('text/plain', 'u'); } catch (err) { /* 忽略 */ }
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      row.addEventListener('dragend', function () {
+        dragUrlRow = null;
+        row.draggable = false;
+        row.classList.remove('dragging');
+        Array.prototype.forEach.call(urlBox.children, function (x) { x.classList.remove('row-drop-target'); });
+      });
+      row.addEventListener('dragover', function (e) {
+        if (!dragUrlRow || dragUrlRow === row) return;
+        e.preventDefault();
+        row.classList.add('row-drop-target');
+      });
+      row.addEventListener('dragleave', function () { row.classList.remove('row-drop-target'); });
+      row.addEventListener('drop', function (e) {
+        e.preventDefault();
+        row.classList.remove('row-drop-target');
+        if (!dragUrlRow || dragUrlRow === row) return;
+        // 往下拖插在目標後面、往上拖插在前面
+        var kids = Array.prototype.slice.call(urlBox.children);
+        if (kids.indexOf(dragUrlRow) < kids.indexOf(row)) row.after(dragUrlRow);
+        else row.before(dragUrlRow);
+      });
+
+      if (after) after.after(row); else urlBox.appendChild(row);
+      if (focus) u.focus();
+      return row;
+    }
+
+    var urls = (item && item.urls) || [];
+    if (urls.length) urls.forEach(function (x) { addUrlRow(x.url, x.note); });
+    else addUrlRow('', '');
+
+    var more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'row-add lk-url-add';
+    more.textContent = '＋ 再加一條網址';
+    more.addEventListener('click', function () { addUrlRow('', '', true); });
+    wrap.appendChild(more);
+
+    var user = labeledInput(wrap, '帳號（選填）', 'text', item && item.user, '');
+    var pass = labeledInput(wrap, '密碼（選填）', 'text', item && item.pass, '');
+    pass.spellcheck = false;
 
     var nl = document.createElement('label');
+    nl.textContent = '備忘（選填）';
     var note = document.createElement('textarea');
     note.rows = 3;
     note.value = (item && item.note) || '';
-    note.addEventListener('keydown', function (e) { e.stopPropagation(); });
-    memoBox.appendChild(nl);
-    memoBox.appendChild(note);
+    note.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); save(); }
+      e.stopPropagation();
+    });
+    wrap.appendChild(nl);
+    wrap.appendChild(note);
 
     var hint = document.createElement('div');
     hint.className = 'field-hint';
+    hint.textContent = '密碼在這裡是明碼顯示，方便確認有沒有打錯；卡片上會遮起來。' +
+      '收合時只看得到名稱，其他的點 ▸ 才會出現。';
     wrap.appendChild(hint);
 
-    function applyKind() {
-      var isMemo = kind === 'memo';
-      infoBox.hidden = isMemo;
-      nl.textContent = isMemo ? '內容' : '備註（可留空）';
-      hint.textContent = isMemo
-        ? '摺疊時只會看到名稱，內容要點開才顯示。'
-        : '密碼欄位在這裡是明碼顯示，方便你確認有沒有打錯。存檔後在卡片上會遮起來。';
-      Array.prototype.forEach.call(seg.children, function (b) {
-        b.classList.toggle('on', b.dataset.kind === kind);
+    function readUrls() {
+      var seen = {};
+      var out = [];
+      Array.prototype.forEach.call(urlBox.querySelectorAll('.lk-url-row'), function (r) {
+        var u = r.querySelector('.lk-url-in').value.trim();
+        var n = r.querySelector('.lk-note-in').value.trim();
+        // 只打了網域（example.com）的補上 https://，不然開出來會變成這個網站底下的一頁
+        if (u && !/^[a-z][a-z0-9+.-]*:/i.test(u)) u = 'https://' + u;
+        if (!u || seen[u]) return;
+        seen[u] = true;
+        out.push({ url: u, note: n });
       });
+      return out;
     }
-
-    [['info', '資訊'], ['memo', '備忘錄']].forEach(function (k) {
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.dataset.kind = k[0];
-      b.textContent = k[1];
-      b.addEventListener('click', function () { kind = k[0]; applyKind(); });
-      seg.appendChild(b);
-    });
-    applyKind();
 
     function save() {
       var list = privateEntries(tab) || [];
-      var isMemo = kind === 'memo';
-      var payload = {
-        kind: kind,
+      var payload = DB.normalizeLinkEntry({
+        id: isNew ? DB.uid() : item.id,
         name: name.value.trim(),
-        url: url.value.trim(),
-        // 切成備忘錄時清掉帳密，避免留下看不到但還在檔案裡的殘值
-        user: isMemo ? '' : user.value.trim(),
-        pass: isMemo ? '' : pass.value,
-        note: note.value.trim()
-      };
+        urls: readUrls(),
+        user: user.value.trim(),
+        pass: pass.value,
+        note: note.value.trim(),
+        off: isNew ? false : item.off === true
+      });
+      if (!payload.name && !payload.urls.length && !payload.user && !payload.pass && !payload.note) {
+        Clip.toast('什麼都還沒填', true);
+        name.focus();
+        return;
+      }
       if (isNew) {
-        payload.id = DB.uid();
-        list.push(payload);
+        list = list.concat([payload]);
       } else {
-        Object.keys(payload).forEach(function (k) { item[k] = payload[k]; });
+        list = list.map(function (x) { return x.id === item.id ? payload : x; });
       }
       setPrivateEntries(tab, list);
       closeModal();
       savePrivate(tab);
     }
+
+    name.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
+        var first = urlBox.querySelector('.lk-url-in');
+        if (first) first.focus();
+      }
+    });
 
     showModal({
       title: isNew ? '新增一筆' : '編輯',
@@ -1843,6 +1930,7 @@
         { text: '儲存', cls: 'btn-primary', onClick: save }
       ]
     });
+    name.focus();
   }
 
   /* ============================================================
@@ -2047,48 +2135,6 @@
     });
   }
 
-  /** 連結項目的拖曳。跟便籤同一套做法，只有排序函式不同。 */
-  function attachLinkDrag(el, tab, link) {
-    el.addEventListener('dragstart', function (e) {
-      dragRow = { tabId: tab.id, rowId: link.id };
-      el.classList.add('dragging');
-      try { e.dataTransfer.setData('text/plain', link.id); } catch (err) { /* 忽略 */ }
-      e.dataTransfer.effectAllowed = 'move';
-      e.stopPropagation();
-    });
-
-    el.addEventListener('dragend', function (e) {
-      dragRow = null;
-      el.draggable = false;
-      el.classList.remove('dragging');
-      clearRowDropMarks();
-      e.stopPropagation();
-    });
-
-    el.addEventListener('dragover', function (e) {
-      if (!dragRow || dragRow.rowId === link.id) return;
-      if (dragRow.tabId !== tab.id) return;
-      e.preventDefault();
-      e.stopPropagation();
-      e.dataTransfer.dropEffect = 'move';
-      el.classList.add('row-drop-target');
-    });
-
-    el.addEventListener('dragleave', function () {
-      el.classList.remove('row-drop-target');
-    });
-
-    el.addEventListener('drop', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      el.classList.remove('row-drop-target');
-      if (dragRow && dragRow.tabId === tab.id && dragRow.rowId !== link.id) {
-        DB.moveLink(tab.id, dragRow.rowId, link.id);
-      }
-      dragRow = null;
-    });
-  }
-
   /**
    * 通用的清單列拖曳（v4.24：待辦、倒數、私人卡片的每一筆）。
    * group 相同才能放：倒數用它限制在「同一天、同一個時間」之內，
@@ -2284,6 +2330,20 @@
     return ccFold(s).indexOf(state.searchFold) >= 0;
   }
 
+  /**
+   * 拿任意一個字去比對（v4.35，TOTP 卡自己的名稱搜尋用）。規則跟頂部搜尋一樣：
+   * 先比原字，字典好了再折成簡體比一次。第一次用到時順便去載字典。
+   */
+  function textMatch(s, q) {
+    q = String(q || '').trim().toLowerCase();
+    if (!q) return true;
+    s = String(s || '').toLowerCase();
+    if (s.indexOf(q) >= 0) return true;
+    ccLoad();
+    if (!CC.conv) return false;
+    return ccFold(s).indexOf(ccFold(q)) >= 0;
+  }
+
   /** 卡片是否符合搜尋：標題或任一內容欄命中都算。 */
   function matchTab(tab) {
     if (!state.search) return true;
@@ -2305,22 +2365,26 @@
         return matchText(i.content);
       });
     }
-    if (tab.type === 'todo' || tab.type === 'countdown') {
+    if (tab.type === 'todo') {
       return (tab.items || []).some(function (i) { return matchText(i.text); });
     }
-    if (tab.type === 'link') {
-      return (tab.links || []).some(function (l) {
-        return matchText(l.name) || matchText(l.url);
-      });
-    }
     if (tab.type === 'private') {
-      /* 加密且鎖著時內容一律不參與搜尋——「搜到了就代表存在」
-         本身就洩漏了資訊。不加密的卡片沒有這個顧慮，照常比對。 */
+      /* 連結收藏（v4.35）。加密且鎖著時內容一律不參與搜尋——「搜到了就代表存在」
+         本身就洩漏了資訊。不加密的卡片沒有這個顧慮，照常比對。
+         比對名稱、每條網址與它的備註、帳號、備忘；密碼永遠不比對（9.5）。
+         以前的連結卡讀的是 l.url，資料其實是 urls 陣列，所以網址一直搜不到（10/01 查到的錯誤） */
       if (tab.encrypted && !Vault.isCardUnlocked(tab.id)) return false;
       var list = privateEntries(tab) || [];
       return list.some(function (x) {
-        return matchText(x.name) || matchText(x.user) || matchText(x.note);
+        return matchText(x.name) || matchText(x.user) || matchText(x.note) ||
+          (x.urls || []).some(function (u) { return matchText(u.url) || matchText(u.note); });
       });
+    }
+    if (tab.type === 'totp') {
+      /* 驗證碼卡（v4.35）：解開的時候比對帳號名稱。金鑰永遠不參與；
+         鎖著的跟加密的連結收藏一樣完全不參與 */
+      if (!Vault.isCardUnlocked(tab.id)) return false;
+      return (privateEntries(tab) || []).some(function (x) { return matchText(x.name); });
     }
     return false;
   }
@@ -2461,6 +2525,7 @@
       openCardMenu: openCardMenu,
       pipSupported: PiP.supported,
       isPipped: PiP.isOpen,
+      isPipActive: PiP.isActive,
       pipMode: PiP.mode,
       togglePip: PiP.toggle,
       togglePipWindow: PiP.toggleWindowed,
@@ -2471,18 +2536,17 @@
       attachDrag: attachCardDrag,
       attachRowDrag: attachRowDrag,
       attachNoteDrag: attachNoteDrag,
-      // 驗證碼卡：新增帳號／改名稱；時鐘偏差（讀不到就是 null）
+      // 驗證碼卡：新增帳號／改名稱；時鐘偏差（讀不到就是 null）；名稱搜尋的比對
       editTotp: editTotp,
+      textMatch: textMatch,
       clockSkew: Drive.clockSkew,
       // 待辦、倒數、私人卡片的每一筆（v4.24）
       attachItemDrag: attachItemDrag,
       movePrivate: movePrivate,
       // 便籤新增一筆（先選型別）、欄位型別的「管理欄位」
       editNoteItem: editNoteItem,
-      attachLinkDrag: attachLinkDrag,
       editPhrase: editPhrase,
       editDueItem: editDueItem,
-      editLink: editLink,
       openLinks: openLinks,
       showPopupHelp: function () { showPopupHelp(null); },
       openCard: function (tab) { openCard(tab, null); },
@@ -2862,7 +2926,17 @@
     });
   }
 
+  var pipRenderTimer = null;
+  function schedulePipRender() {
+    if (pipRenderTimer || !PiP.mode()) return;
+    pipRenderTimer = setTimeout(function () {
+      pipRenderTimer = null;
+      PiP.render({ quiet: true });
+    }, 0);
+  }
+
   function render() {
+    if (pipRenderTimer) { clearTimeout(pipRenderTimer); pipRenderTimer = null; }
     applyZoom();
     applyTheme();
     closeColorPop();   // 重繪後原本的色點已經不在了，視窗留著會指向空氣
@@ -2888,10 +2962,8 @@
   var TYPES = {
     quickphrase: ['常用語', '雙欄清單，點一下複製內容'],
     note: ['便籤', '自由文字，或一排固定欄位'],
-    todo: ['待辦清單', '可勾選的任務'],
-    countdown: ['倒數提醒', '顯示距離某天還有幾天'],
-    link: ['連結收藏', '常用網址清單'],
-    private: ['私人', '加密保存，需要主密碼才看得到'],
+    todo: ['待辦', '可勾選的任務，加上日期就會倒數'],
+    private: ['連結收藏', '常用網址，可加帳密與備忘，可選要不要加密'],
     totp: ['TOTP', '跟手機 Authenticator 一樣的 6 位數，需要主密碼'],
     codegen: ['編碼', '選好選項產生一段文案與一組隨機碼'],
     form: ['表單', '填幾個欄位，照你的格式產生一段可以複製的文字'],
@@ -3786,16 +3858,20 @@
     ['便籤', '隨手記事，或一張固定格式的單子',
      '自由文字直接打；「欄位」型設好欄位名後，每次填值、一鍵複製、一鍵清空',
      '複製只帶欄位內容、不帶標題；一鍵清空會清成空白；改欄位名要從「管理欄位」'],
-    ['待辦清單', '要做的事', '打字新增、勾選完成、拖把手排順序', ''],
-    ['倒數提醒', '距離某天還有幾天', '一張卡可以放好幾件事，各自設日期（可加時間）',
-     '到期當天變紅；同一天的才能拖曳排序'],
-    ['連結收藏', '常用網址', '點名稱開網頁；勾選多個一次開；複製鈕複製網址',
-     '一個項目可放多條網址，開啟時隨機挑一條、複製固定第一條；一次開很多分頁可能被瀏覽器擋，⋯ 選單有解法'],
-    ['私人', '不想被旁人看到的資料', '可選要不要加密，加密的要主密碼才打得開',
-     '<b>主密碼忘了只能用復原金鑰</b>（建立時給的那串，請抄下來）；解開 10 分鐘自動鎖定；鎖著時搜尋不到；刪除要先輸入主密碼'],
+    ['待辦', '要做的事，可以加日期倒數',
+     '「＋ 新增任務」打名稱按 Enter 就好；要倒數就填日期（可加時間）；點右邊的小標可以改日期',
+     '有日期的排上面、依日期排，到期當天變紅；沒日期的排下面，順序自己拖；' +
+     '有日期的同一天才能拖曳排序；有日期的勾完會沉到「已完成」'],
+    ['連結收藏', '常用網址，也可以記帳號密碼與備忘',
+     '點名稱開第一條網址；勾選多個一次開；複製鈕複製第一條；▸ 展開看其他網址、帳號、密碼、備忘；' +
+     '「複製開啟連結」貼到另一個瀏覽器設定檔的網址列，就會開出勾選的網址（那邊不用登入）',
+     '一筆可以放好幾條網址，每條可以寫備註；一次開很多分頁可能被瀏覽器擋，⋯ 選單有解法；' +
+     '可以從 ⋯ 選單加上密碼保護：加密的卡片標題旁有小鎖頭，要主密碼才打得開、解開 10 分鐘自動鎖定、' +
+     '鎖著時搜尋不到、刪除要先輸入主密碼；<b>主密碼忘了只能用復原金鑰</b>（建立時給的那串，請抄下來）'],
     ['TOTP', '跟手機 Authenticator 一樣的 6 位數',
-     '貼金鑰、貼 otpauth 連結或貼 QR 截圖加帳號；點數字就複製',
-     '跟私人卡片同一組主密碼；不會自動鎖定，按 ⦿ 或登出才鎖；眼睛可以暫時遮住數字；' +
+     '貼金鑰、貼 otpauth 連結或貼 QR 截圖加帳號；點數字就複製；帳號兩個以上時上面有搜尋框，' +
+     '打幾個字按 Enter 就複製第一個（小視窗裡也能用）',
+     '跟加密的連結收藏同一組主密碼；不會自動鎖定，按 ⦿ 或登出才鎖；眼睛可以暫時遮住數字；' +
      '<b>不要放 Google 帳號自己的兩步驟驗證</b>（要驗證碼才登得進 Google，要登進 Google 才拿得到驗證碼）；' +
      '電腦時鐘不準時數字會錯；超過六個帳號時只露出六個，其他往下捲'],
     ['編碼', '選好選項，產生一段文案＋一組隨機碼', '點選項 → 輸出區出現文字 → 複製', ''],
@@ -3821,7 +3897,8 @@
       '<b>建分類</b>：左側欄分類旁的 ＋，例如「工作」「生活」',
       '<b>加卡片</b>：右上角「＋ 新增卡片」，挑一種卡片',
       '<b>開始用</b>：點常用語的一列就複製，到要用的地方按 Ctrl + V',
-      '<b>要一直看著的卡片</b>：卡片標題列的彈出鈕（私人、TOTP 卡在 ⋯ 裡）→ 變成浮在最上層的小視窗'
+      '<b>要一直看著的卡片</b>：卡片標題列的彈出鈕（加密的連結收藏、TOTP 卡在 ⋯ 裡）→ 變成浮在最上層的小視窗；' +
+        '再按別張的彈出鈕會加進同一個小視窗，上面一排名稱切換'
     ], true);
 
     sec('卡片說明');
@@ -3853,19 +3930,23 @@
     list([
       '搜尋：頂部搜尋框跨所有分類，簡體繁體都找得到',
       '拖曳：卡片左上 ⠿ 拖卡片；清單每一列左邊 ⠿ 排順序；拖到側欄分類可以搬過去',
-      '釘選：標題列的 ☆（私人、TOTP 卡在 ⋯ 裡），固定在最前面（每個分類、每種卡片最多 3 張）',
+      '釘選：標題列的 ☆（加密的連結收藏、TOTP 卡在 ⋯ 裡），固定在最前面（每個分類、每種卡片最多 3 張）',
       '收合：標題列的 ▾ 把卡片收成一條，▸ 展開',
-      '小紅點：有今天到期或已過期的待辦／倒數，收合的卡片與側欄分類都會亮',
-      '顏色：標題列的小圓點（私人、TOTP 卡在 ⋯ 裡）；☰ →「外觀」換主題與上色方式',
+      '小紅點：有今天到期或已過期的待辦，收合的卡片與側欄分類都會亮',
+      '顏色：標題列的小圓點（加密的連結收藏、TOTP 卡在 ⋯ 裡）；☰ →「外觀」換主題、上色方式與介面字型',
       '顯示大小：頂部「顯示大小」調整整頁縮放',
       '多行內容：Enter 換行，Ctrl + Enter 存檔',
-      '小視窗：置頂小視窗只有 Chrome、Edge 支援；⋯ 裡的「不置頂視窗」任何瀏覽器都能開'
+      '小視窗：置頂小視窗只有 Chrome、Edge 支援；⋯ 裡的「不置頂視窗」任何瀏覽器都能開；' +
+        '一個小視窗可以放好幾張卡片，名稱旁的 ✕ 把那張移出'
     ]);
 
     sec('常見問題');
     [
       ['重新整理後要重新登入？', '瀏覽器可能擋了第三方 Cookie，點雲朵再登入一次；沒登入時改的東西不會丟，登入後會補傳'],
       ['一次開多個網址只開了一個？', '瀏覽器擋了彈出視窗，在網址列右邊允許這個網站'],
+      ['想在另一個瀏覽器設定檔開這些網址？', '連結收藏勾好要開的，按「複製開啟連結」，到另一個設定檔的網址列貼上。' +
+        '那一頁只負責開網址，不用登入；第一次在那個設定檔用時，要允許這個網站的彈出式視窗'],
+      ['簡體字有幾個字長得不一樣？', '☰ →「外觀」→「介面字型」改成雅黑體，繁簡就一致了'],
       ['TOTP 數字跟手機不一樣？', '檢查電腦時鐘；登入雲端時如果偵測到時差，會在卡片上方提醒'],
       ['主密碼忘了？', '在鎖著的卡片上點「忘記主密碼」，用復原金鑰重設'],
       ['小視窗點不出來／消失？', '置頂小視窗只能從主視窗開，關掉主視窗它也會一起關']
@@ -3891,10 +3972,98 @@
   }
 
   /* ============================================================
+     開啟連結頁（v4.35）
+     ------------------------------------------------------------
+     網址的 # 後面是 open=…（連結收藏的「複製開啟連結」做出來的），
+     這一頁就只負責把那些網址開出來：不讀資料、不登入、不碰雲端。
+     使用者的需求是「在另一個瀏覽器設定檔開這些網址，但不想兩邊都登入這個工具」
+     （兩邊都登入同一份雲端會互相蓋存檔）。
+
+     沒有使用者點擊的 window.open 一律被擋，除非這個網站已經被允許彈出視窗。
+     所以一進來先試一次：允許過的就全部開好了；沒允許的跳說明，下面每一條也都能
+     自己點（使用者 10/02 選的提示方式）。
+     ============================================================ */
+
+  function runOpener(list) {
+    document.title = '開啟連結';
+    var app = $('app');
+    if (app) app.hidden = true;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'op-wrap';
+    wrap.innerHTML = '<h1 class="op-title"></h1><div class="op-status"></div>' +
+      '<div class="op-actions"></div><ol class="op-list"></ol><p class="op-foot"></p>';
+    document.body.appendChild(wrap);
+
+    var title = wrap.querySelector('.op-title');
+    var status = wrap.querySelector('.op-status');
+    var acts = wrap.querySelector('.op-actions');
+    var ol = wrap.querySelector('.op-list');
+    wrap.querySelector('.op-foot').textContent =
+      '這一頁只負責開網址：沒有讀取任何資料，也不用登入。網址放在 # 後面，不會傳到伺服器。';
+
+    if (!list.length) {
+      title.textContent = '這條開啟連結裡沒有網址';
+      status.textContent = '可能是複製時少了一段。回到原本的分頁，在連結收藏按「複製開啟連結」再複製一次。';
+      return;
+    }
+
+    title.textContent = '開啟 ' + list.length + ' 個網址';
+
+    list.forEach(function (x) {
+      var li = document.createElement('li');
+      var a = document.createElement('a');
+      a.href = x.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = x.name || x.url;
+      li.appendChild(a);
+      var u = document.createElement('span');
+      u.className = 'op-url';
+      u.textContent = x.url;
+      li.appendChild(u);
+      ol.appendChild(li);
+    });
+
+    var btn = document.createElement('button');
+    btn.className = 'btn-primary';
+    btn.textContent = '全部開啟（' + list.length + '）';
+    acts.appendChild(btn);
+
+    function openAll(byClick) {
+      var opened = 0, blocked = 0;
+      list.forEach(function (x) { if (Tabs.openTab(x.url)) opened++; else blocked++; });
+      status.className = 'op-status' + (blocked ? ' warn' : ' ok');
+      if (!blocked) {
+        status.textContent = '已開啟 ' + opened + ' 個分頁，這一頁可以關掉了。';
+      } else if (!opened && !byClick) {
+        status.textContent = '瀏覽器擋住了 ' + blocked + ' 個網址。請按網址列右邊被擋下的彈出式視窗圖示，' +
+          '選「一律允許」，再按一次下面的「全部開啟」。也可以直接點下面的網址一條一條開。';
+      } else {
+        status.textContent = '開了 ' + opened + ' 個，瀏覽器擋住了 ' + blocked + ' 個網址。' +
+          '請按網址列右邊的圖示允許彈出視窗，再按一次「全部開啟」；或直接點下面的網址一條一條開。';
+      }
+    }
+
+    btn.addEventListener('click', function () { openAll(true); });
+    // 一進來先試一次：這個設定檔已經允許過彈出視窗的話，直接就全部開好了
+    openAll(false);
+  }
+
+  /* ============================================================
      啟動
      ============================================================ */
 
   function init() {
+    /* 開啟連結頁：不載入資料、不登入（理由見 runOpener） */
+    var openList = DB.parseOpenLink(location.hash);
+    /* 同一個分頁貼上新的開啟連結時，瀏覽器只換 # 後面、不會重新載入，
+       這一頁就不會有反應。偵測到就自己重新載入一次 */
+    window.addEventListener('hashchange', function () {
+      if (DB.parseOpenLink(location.hash)) location.reload();
+    });
+    if (openList) { runOpener(openList); return; }
+
     DB.load();
     // 存不進去的時候要講出來，不能只印在主控台
     DB.onSaveError(showSaveError);
@@ -3911,9 +4080,17 @@
       autoLockMinutes: AUTO_LOCK_MINUTES,
       lockMinutesFor: lockMinutesFor,
       unlockedToast: unlockedToast,
+      textMatch: textMatch,
       onChange: render
     });
     DB.onChange(render);
+
+    /* 「不重畫」的修改也要讓小視窗跟上（v4.35，10/01 查到的錯誤）：
+       主視窗就地改文字、改標題、勾連結這類走 DB.touch(true)，不發 onChange，
+       小視窗的重畫又是掛在主視窗 render() 的最後——所以小視窗一直是舊的。
+       主視窗本身不能在這裡重畫（會吃掉正在進行的點擊，11.20），只排小視窗那一份；
+       同一輪如果主視窗也重畫了，render() 會順手把這個排程取消。 */
+    DB.onDirty(schedulePipRender);
 
     /* 雲端同步。**不主動跳授權視窗**——只是想看一眼常用語的時候被 Google
        的視窗擋住很煩。但這個分頁先前登入過時會自動去靜默取一次權杖

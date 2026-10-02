@@ -106,6 +106,144 @@
     return out;
   }
 
+  /* ============================================================
+     連結收藏（v4.35：原本的連結卡與私人卡片合成同一種）
+     ------------------------------------------------------------
+     一筆 = 名稱、好幾條網址（每條可以有備註）、帳號／密碼（選填）、備忘（選填）。
+     加密是整張卡片的開關：不加密時放在 tab.entries，加密時在 tab.enc（密文），
+     解開之後的明文只在記憶體（vault.js），規則跟以前的私人卡片一模一樣。
+
+     **資料的「容器」沿用 private 這個類型。** 原因是舊版程式（還沒更新的分頁、
+     另一台電腦）讀到 private 卡片時，entries 與 enc 會原封不動保留；如果改用
+     新的類型名稱或 link，舊版存檔時會把不認得的欄位丟掉——加密的內容就沒了。
+     畫面上叫「連結收藏」，類型名稱只是內部用的。
+
+     舊資料的三種來源都在這裡轉成同一個樣子：
+       連結卡的 { name, urls:['…'], order, off }
+       私人卡片的 { kind, name, url, user, pass, note }（備忘錄的內容本來就在 note）
+       新格式的 { name, urls:[{ url, note }], user, pass, note, off }
+     ============================================================ */
+
+  function normalizeUrlList(x) {
+    var raw = [];
+    var src = Array.isArray(x.urls) ? x.urls : (Array.isArray(x.Urls) ? x.Urls : []);
+    src.forEach(function (u) {
+      if (u && typeof u === 'object') raw.push({ url: u.url, note: u.note });
+      else raw.push({ url: u, note: '' });
+    });
+    /* 舊版私人卡片的單一網址。舊版程式改過一筆新格式的資料時也會留下這個欄位，
+       不在清單裡的才補在最前面 */
+    if (typeof x.url === 'string' && x.url.trim()) raw.unshift({ url: x.url, note: '' });
+    if (typeof x.Url === 'string' && x.Url.trim()) raw.unshift({ url: x.Url, note: '' });
+
+    var seen = {};
+    var out = [];
+    raw.forEach(function (u) {
+      var url = String(u.url == null ? '' : u.url).trim();
+      if (!url || seen[url]) return;
+      seen[url] = true;
+      out.push({ url: url, note: typeof u.note === 'string' ? u.note.trim() : '' });
+    });
+    return out;
+  }
+
+  /** 一筆連結收藏。資料檔與解密出來的內容都走這裡（可能被動過手腳）。 */
+  function normalizeLinkEntry(x) {
+    x = (x && typeof x === 'object') ? x : {};
+    var out = {
+      id: (typeof x.id === 'string' && x.id) ? x.id : uid(),
+      name: String(x.name || x.Name || '').trim(),
+      urls: normalizeUrlList(x),
+      user: typeof x.user === 'string' ? x.user : '',
+      pass: typeof x.pass === 'string' ? x.pass : '',
+      note: typeof x.note === 'string' ? x.note : ''
+    };
+    if (x.off === true) out.off = true;
+    return out;
+  }
+
+  function normalizeLinkEntries(list) {
+    if (!Array.isArray(list)) return [];
+    // 連結卡的順序在 order 欄位；私人卡片沒有這個欄位，陣列順序就是畫面順序
+    var arr = list.slice();
+    if (arr.some(function (x) { return x && typeof x.order === 'number'; })) {
+      arr = arr.map(function (x, i) { return { x: x, i: i }; }).sort(function (a, b) {
+        var oa = a.x && typeof a.x.order === 'number' ? a.x.order : a.i;
+        var ob = b.x && typeof b.x.order === 'number' ? b.x.order : b.i;
+        return oa - ob || a.i - b.i;
+      }).map(function (p) { return p.x; });
+    }
+    return arr.map(normalizeLinkEntry);
+  }
+
+  /* ============================================================
+     「開啟連結」（v4.35）
+     ------------------------------------------------------------
+     把勾選的網址包進這個工具自己的網址的 # 後面，貼到另一個瀏覽器設定檔的
+     網址列，那一頁就把網址一個個開出來——不必在那個設定檔登入這個工具
+     （兩邊都登入同一份雲端會互相蓋存檔）。
+     # 後面的東西瀏覽器不會送到伺服器。
+     ============================================================ */
+
+  var OPEN_PREFIX = '#open=';
+  var OPEN_MAX = 100;
+
+  /** 只收 http／https。這一段是從網址列進來的，任何人都能造一條連結塞東西 */
+  function safeHttpUrl(u) {
+    u = String(u || '').trim();
+    return /^https?:\/\/[^\s]+$/i.test(u) ? u : '';
+  }
+
+  function b64urlEncode(str) {
+    var bytes = new TextEncoder().encode(str);
+    var bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function b64urlDecode(s) {
+    var b64 = String(s || '').replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+
+  /**
+   * @param {string} base 這個工具的網址（不含 #）
+   * @param {Array} list [{ name, url }]
+   * @returns {string} 組好的網址；一條能用的都沒有時回空字串
+   */
+  function buildOpenLink(base, list) {
+    var items = [];
+    (list || []).forEach(function (x) {
+      var u = safeHttpUrl(x && x.url);
+      if (u && items.length < OPEN_MAX) items.push([String((x && x.name) || '').slice(0, 80), u]);
+    });
+    if (!items.length) return '';
+    return String(base || '').split('#')[0] + OPEN_PREFIX + b64urlEncode(JSON.stringify(items));
+  }
+
+  /**
+   * 拆開 #open= 的內容。壞掉的、不是 http／https 的一律丟掉。
+   * @returns {Array|null} [{ name, url }]；不是開啟連結時回 null
+   */
+  function parseOpenLink(hash) {
+    hash = String(hash || '');
+    if (hash.indexOf(OPEN_PREFIX) !== 0) return null;
+    var arr;
+    try { arr = JSON.parse(b64urlDecode(hash.slice(OPEN_PREFIX.length))); } catch (e) { return []; }
+    if (!Array.isArray(arr)) return [];
+    var out = [];
+    arr.forEach(function (x) {
+      if (!Array.isArray(x)) return;
+      var u = safeHttpUrl(x[1]);
+      if (u && out.length < OPEN_MAX) out.push({ name: String(x[0] || '').slice(0, 80), url: u });
+    });
+    return out;
+  }
+
   /**
    * 把複製鍵正規化成統一寫法：'A'、'5'、'ALT+A'。
    * 只接受單一個 0-9 或 A-Z，可選擇搭配 Alt。不合法一律回傳空字串。
@@ -148,9 +286,18 @@
   var TYPE_COLOR = {
     quickphrase: 'green',
     todo: 'blue',
+    // 下面兩個是舊類型（v4.35 合併掉了），保留給「不加密的連結收藏」與倒數轉過來的卡片用
     countdown: 'pink',
     link: 'tea'
   };
+
+  /* 卡片類型的預設色。連結收藏（v4.35）不加密時跟以前的連結卡一樣是奶茶褐；
+     加密時跟以前的私人卡片一樣中性——刻意不給專屬顏色（規格書 9.7） */
+  function typeColor(tab) {
+    if (!tab) return null;
+    if (tab.type === 'private') return tab.encrypted === false ? TYPE_COLOR.link : null;
+    return TYPE_COLOR[tab.type] || null;
+  }
 
   function isPaletteKey(v) {
     return PALETTE.some(function (p) { return p.key === v; });
@@ -279,11 +426,25 @@
      不認得的名字丟掉、重複的丟掉；程式認得但清單裡沒有的補在最後面——
      之後新增卡片類型時，舊的資料檔不會讓它消失。
      沒排過就是 null，畫面用出廠順序。 */
-  var CARD_TYPES = ['quickphrase', 'note', 'todo', 'countdown', 'link',
-                    'private', 'totp', 'codegen', 'form', 'table'];
+  /* v4.35：倒數併進待辦、連結卡與私人卡片合成「連結收藏」（類型名稱沿用 private，
+     理由見 normalizeLinkEntry 上面的註解）。新增卡片的磁磚少了兩格 */
+  var CARD_TYPES = ['quickphrase', 'note', 'todo', 'private',
+                    'totp', 'codegen', 'form', 'table'];
 
   function normalizeTypeOrder(v) {
     if (!Array.isArray(v)) return null;
+    v = v.slice();
+    /* 舊順序裡的合併前類型：合併後的磁磚放在「連結」原本的位置、「待辦」原本的位置
+       （使用者 10/02 選的）。所以有 link 的時候先拿掉 private，再把 link 換成 private */
+    if (v.indexOf('link') >= 0) {
+      v = v.filter(function (t) { return t !== 'private'; })
+           .map(function (t) { return t === 'link' ? 'private' : t; });
+    }
+    if (v.indexOf('countdown') >= 0) {
+      v = v.indexOf('todo') >= 0
+        ? v.filter(function (t) { return t !== 'countdown'; })
+        : v.map(function (t) { return t === 'countdown' ? 'todo' : t; });
+    }
     var out = [];
     v.forEach(function (t) {
       if (typeof t === 'string' && CARD_TYPES.indexOf(t) >= 0 && out.indexOf(t) < 0) out.push(t);
@@ -310,6 +471,26 @@
     return true;
   }
 
+  /* 介面字型（v4.35）。微軟正黑體沒有「录、码」這類簡體字，Windows 會從別套字型借字，
+     同一行繁簡混排時字型不一致（使用者截圖）。三個選項都只用電腦內建的字型，
+     不載入網路字型（零對外請求）。這個值會被寫進 <html data-font>，所以只收名單裡的 */
+  var UI_FONTS = ['jhenghei', 'yahei', 'system'];
+
+  function normalizeUiFont(v) {
+    return UI_FONTS.indexOf(v) >= 0 ? v : 'jhenghei';
+  }
+
+  function uiFont() {
+    return normalizeUiFont(data.settings && data.settings.uiFont);
+  }
+
+  function setUiFont(v) {
+    var next = normalizeUiFont(v);
+    if (uiFont() === next) return;
+    data.settings.uiFont = next;
+    touch();
+  }
+
   function normalizeSettings(s) {
     s = s || {};
     var th = s.theme || {};
@@ -319,6 +500,7 @@
       popupHintShown: !!s.popupHintShown,
       pipSize: normalizePipSize(s.pipSize),
       uiZoom: normalizeZoom(s.uiZoom),
+      uiFont: normalizeUiFont(s.uiFont),
       typeOrder: normalizeTypeOrder(s.typeOrder),
       theme: {
         // 預設亮色＋細線版。寫成「不是 dark 就當 light」，所以只有資料裡
@@ -343,7 +525,7 @@
   /** 卡片實際要顯示的色票名，中性回傳 null。 */
   function tabColor(tab) {
     if (!tab || tab.color === 'none') return null;
-    return tab.color || TYPE_COLOR[tab.type] || null;
+    return tab.color || typeColor(tab);
   }
 
   /* ---------- 預設資料 ---------- */
@@ -410,10 +592,10 @@
       base.notes = [];
       base.notesFold = false;   // 附註那排收起來沒有。出廠展開
     }
-    if (type === 'link') base.links = [];
-    if (type === 'countdown') base.items = [];
     if (type === 'private') {
-      base.badge = '私人';        // 標題列小圓標的文字，可自行改成不起眼的字
+      /* 連結收藏（v4.35，原本的連結卡＋私人卡片）。小圓標可以點了改字，
+         加密的卡片可以換成不起眼的字（9.7） */
+      base.badge = '連結';
       /* encrypted 刻意不給預設值。建立卡片時強制使用者二選一，
          沒選過的卡片不該被當成「已加密」或「未加密」任何一種。 */
       base.encrypted = null;
@@ -776,7 +958,7 @@
    */
   function moveItem(tabId, fromId, toId) {
     var tab = findTab(tabId);
-    if (!tab || ['note', 'todo', 'countdown'].indexOf(tab.type) < 0 || fromId === toId) return;
+    if (!tab || ['note', 'todo'].indexOf(tab.type) < 0 || fromId === toId) return;
 
     var list = (tab.items || []).slice().sort(function (a, b) { return a.order - b.order; });
     var from = list.findIndex(function (x) { return x.id === fromId; });
@@ -791,27 +973,15 @@
     touch();
   }
 
-  /** 連結項目的拖曳排序。跟便籤、常用語各自一套，因為清單不同。 */
-  function moveLink(tabId, fromId, toId) {
-    var tab = findTab(tabId);
-    if (!tab || tab.type !== 'link' || fromId === toId) return;
-
-    var list = (tab.links || []).slice().sort(function (a, b) { return a.order - b.order; });
-    var from = list.findIndex(function (x) { return x.id === fromId; });
-    var to = list.findIndex(function (x) { return x.id === toId; });
-    if (from < 0 || to < 0) return;
-
-    var moved = list.splice(from, 1)[0];
-    list.splice(to, 0, moved);
-    list.forEach(function (x, i) { x.order = i; });
-    tab.links = list;
-    tab.updatedAt = nowIso();
-    touch();
-  }
-
   /* ============================================================
-     倒數提醒：每一筆各自有日期與（選填的）時間
+     待辦（v4.35 起倒數併進來）：每一筆各自有日期與（選填的）時間
      ------------------------------------------------------------
+     v4.35：待辦與倒數合成同一種卡片（使用者 10/01 選的）。日期是選填的，
+     有日期就是以前的倒數、沒日期就是以前的待辦。資料的容器沿用 todo：
+     舊版程式讀 todo 卡片時 items 原樣保留（不會丟掉 due／time），
+     讀 countdown 反而會重新整理欄位——用 todo 對還沒更新的分頁比較安全。
+
+     以下是倒數時代的說明，仍然成立：
      v4.10 之前是「卡片一個日期 + 一串沒有日期的子任務」，一張卡片只能倒數
      一件事。現在日期搬到每一筆身上，同一天的多件事與不同天的事可以放在
      同一張卡片裡。
@@ -907,7 +1077,7 @@
    * 裡面的日期，提醒不能跟著消失。
    */
   function tabHasDue(tab, now) {
-    if (!tab || tab.type !== 'countdown') return false;
+    if (!tab || tab.type !== 'todo') return false;
     now = now || new Date();
     return (tab.items || []).some(function (i) {
       if (i.done) return false;
@@ -934,7 +1104,7 @@
     var best = null;
 
     data.tabs.forEach(function (t) {
-      if (t.type !== 'countdown') return;
+      if (t.type !== 'todo') return;
       (t.items || []).forEach(function (i) {
         if (!i.due) return;
         any = true;
@@ -1220,6 +1390,9 @@
 
       out.tabs.push(tab);
     });
+
+    // 連結、倒數這些舊類型由 normalizeTab 統一轉成合併後的樣子（v4.35）
+    out.tabs = out.tabs.map(function (t, i) { return normalizeTab(t, i); });
 
     if (!out.categories.length) return emptyData();
     return out;
@@ -1563,16 +1736,29 @@
 
   /** 補齊單一分頁缺少的欄位，避免畫面渲染時到處要判斷 undefined。 */
   function normalizeTab(t, i) {
+    var type = String(t.type || 'note').toLowerCase();
+    /* v4.35 的兩個合併：倒數 → 待辦、連結 → 連結收藏（類型名稱 private）。
+       舊資料（含保留區、匯入檔、雲端上的舊檔）一律在這裡轉一次，內容一個字都不動。
+       顏色原本跟隨類型的，倒數補上原本的粉色，看起來跟以前一樣；
+       連結卡轉過來是不加密的連結收藏，預設色本來就是同一個奶茶褐（typeColor） */
+    var legacyColor = null;
+    if (type === 'countdown') {
+      type = 'todo';
+      if (t.color == null) legacyColor = TYPE_COLOR.countdown;
+    }
+    var fromLink = type === 'link';
+    if (fromLink) type = 'private';
+
     var tab = {
       id: t.id || uid(),
       categoryId: t.categoryId || '',
-      type: (t.type || 'note').toLowerCase(),
+      type: type,
       title: t.title || '未命名',
       order: typeof t.order === 'number' ? t.order : i,
       pinned: !!t.pinned,
       // 收合是版面偏好，跟著資料檔走（換電腦、匯入之後仍然收著）
       collapsed: !!t.collapsed,
-      color: normalizeTabColor(t.color),
+      color: legacyColor || normalizeTabColor(t.color),
       createdAt: t.createdAt || nowIso(),
       updatedAt: t.updatedAt || nowIso()
     };
@@ -1592,9 +1778,8 @@
         };
       });
     }
-    if (tab.type === 'todo') tab.items = t.items || [];
-    if (tab.type === 'link') tab.links = (t.links || []).map(normalizeLink);
-    if (tab.type === 'countdown') tab.items = normalizeDueItems(t.items, t.dueDate);
+    // 待辦與倒數合併（v4.35）：日期、時間都選填，舊待辦沒有這兩個欄位就是空的
+    if (tab.type === 'todo') tab.items = normalizeDueItems(t.items, t.dueDate);
     if (tab.type === 'table') { tab.columns = t.columns || []; tab.rows = t.rows || []; }
     if (tab.type === 'codegen') {
       tab.labels = normalizeGenLabels(t.labels);
@@ -1613,12 +1798,20 @@
       // 附註選項多的時候可以整排收起來。跟卡片收合一樣是版面偏好，跟著資料走
       tab.notesFold = !!t.notesFold;
     }
-    if (tab.type === 'private') {
-      tab.badge = t.badge || '私人';
+    if (tab.type === 'private' && fromLink) {
+      // 舊的連結卡：不加密的連結收藏。勾選狀態（off）照搬
+      tab.badge = '連結';
+      tab.encrypted = false;
+      tab.vault = null;
+      tab.enc = null;
+      tab.entries = normalizeLinkEntries(t.links);
+    } else if (tab.type === 'private') {
+      tab.badge = typeof t.badge === 'string' && t.badge.trim() ? t.badge : '私人';
       tab.encrypted = (t.encrypted === true || t.encrypted === false) ? t.encrypted : null;
       tab.vault = t.vault || null;
       tab.enc = t.enc || null;
-      tab.entries = Array.isArray(t.entries) ? t.entries : [];
+      // 加密卡片的內容在 enc 裡，解開之後在 tabs.js 才整理（DB.normalizeLinkEntry）
+      tab.entries = normalizeLinkEntries(t.entries);
     }
     if (tab.type === 'totp') {
       // 一律加密；明文不會出現在資料檔裡，就算被塞了 entries 也不收
@@ -2485,7 +2678,14 @@
     CARD_TYPES: CARD_TYPES,
     typeOrder: typeOrder,
     moveType: moveType,
-    moveLink: moveLink,
+    normalizeLinkEntry: normalizeLinkEntry,
+    normalizeLinkEntries: normalizeLinkEntries,
+    buildOpenLink: buildOpenLink,
+    parseOpenLink: parseOpenLink,
+    typeColor: typeColor,
+    UI_FONTS: UI_FONTS,
+    uiFont: uiFont,
+    setUiFont: setUiFont,
     wipeLocal: wipeLocal,
     memoryOnly: memoryOnly,
     legacyMigrated: legacyMigrated,
