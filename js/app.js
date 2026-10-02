@@ -4010,38 +4010,69 @@
 
     title.textContent = '開啟 ' + list.length + ' 個網址';
 
-    list.forEach(function (x) {
+    /* 只開還沒開的（261002c，使用者 10/02）：沒允許彈出視窗時，Chrome 每點一下只放行第一個，
+       原本再按一次是全部重開——第一個一直重複、後面的永遠被擋。
+       現在記住哪幾條開過（按鈕開的、自己點清單開的都算），按鈕只開剩下的；
+       沒允許的話每按一次往下開一個，允許之後一次開完。全部開過之後按鈕變「全部再開一次」 */
+    var done = list.map(function () { return false; });
+    var items = [];
+
+    list.forEach(function (x, i) {
       var li = document.createElement('li');
       var a = document.createElement('a');
       a.href = x.url;
       a.target = '_blank';
       a.rel = 'noopener';
       a.textContent = x.name || x.url;
+      a.addEventListener('click', function () { done[i] = true; paint(); });
       li.appendChild(a);
+      var mark = document.createElement('span');
+      mark.className = 'op-done';
+      mark.textContent = '✓ 已開';
+      li.appendChild(mark);
       var u = document.createElement('span');
       u.className = 'op-url';
       u.textContent = x.url;
       li.appendChild(u);
       ol.appendChild(li);
+      items.push(li);
     });
 
     var btn = document.createElement('button');
     btn.className = 'btn-primary';
-    btn.textContent = '全部開啟（' + list.length + '）';
     acts.appendChild(btn);
 
+    function left() { return done.filter(function (d) { return !d; }).length; }
+
+    function paint() {
+      var n = left();
+      items.forEach(function (li, i) { li.classList.toggle('done', done[i]); });
+      if (!n) btn.textContent = '全部再開一次（' + list.length + '）';
+      else if (n < list.length) btn.textContent = '開啟剩下的（' + n + '）';
+      else btn.textContent = '全部開啟（' + list.length + '）';
+      if (!n) {
+        status.className = 'op-status ok';
+        status.textContent = '全部 ' + list.length + ' 個都開過了，這一頁可以關掉了。';
+      }
+    }
+
     function openAll(byClick) {
+      // 全部都開過了：使用者按「全部再開一次」，從頭來
+      if (!left()) done = done.map(function () { return false; });
       var opened = 0, blocked = 0;
-      list.forEach(function (x) { if (Tabs.openTab(x.url)) opened++; else blocked++; });
-      status.className = 'op-status' + (blocked ? ' warn' : ' ok');
-      if (!blocked) {
-        status.textContent = '已開啟 ' + opened + ' 個分頁，這一頁可以關掉了。';
-      } else if (!opened && !byClick) {
+      list.forEach(function (x, i) {
+        if (done[i]) return;
+        if (Tabs.openTab(x.url)) { done[i] = true; opened++; } else blocked++;
+      });
+      paint();
+      if (!blocked) return;     // 全部開完，paint 已經寫好「都開過了」
+      status.className = 'op-status warn';
+      if (!opened && !byClick) {
         status.textContent = '瀏覽器擋住了 ' + blocked + ' 個網址。請按網址列右邊被擋下的彈出式視窗圖示，' +
-          '選「一律允許」，再按一次下面的「全部開啟」。也可以直接點下面的網址一條一條開。';
+          '選「一律允許」，再按一次下面的按鈕。也可以直接點下面的網址一條一條開。';
       } else {
-        status.textContent = '開了 ' + opened + ' 個，瀏覽器擋住了 ' + blocked + ' 個網址。' +
-          '請按網址列右邊的圖示允許彈出視窗，再按一次「全部開啟」；或直接點下面的網址一條一條開。';
+        status.textContent = (opened ? '開了 ' + opened + ' 個，' : '') + '還有 ' + blocked + ' 個被瀏覽器擋住。' +
+          '請按網址列右邊的圖示允許彈出視窗，再按「開啟剩下的」；沒允許的話每按一次會開下一個，或直接點下面的網址。';
       }
     }
 

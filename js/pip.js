@@ -248,6 +248,27 @@
     '<path d="M12 13.2V21"/></svg>';
 
   /** 名稱那一排（A1）：點名稱切換，✕ 把那張移出。兩張以上才出現——只有一張時就是整個視窗 */
+  var ASK_MS = 3000;
+  var askId = null;      // 按了一下 ✕、等第二下確認的那一張
+  var askTimer = null;
+
+  function paintX(x, ask) {
+    x.className = 'pip-tab-x' + (ask ? ' ask' : '');
+    x.textContent = ask ? '移出？' : '✕';
+    x.title = ask ? '再按一次移出（卡片本身不會刪掉）' : '從小視窗移出（要按兩下；卡片本身不會刪掉）';
+  }
+
+  /** 收回「移出？」：只改那一顆按鈕，不重畫整個小視窗（不然正在打的字會被吃掉） */
+  function clearAsk() {
+    if (askTimer) { clearTimeout(askTimer); askTimer = null; }
+    if (askId === null) return;
+    askId = null;
+    try {
+      var b = win && !win.closed && win.document.querySelector('.pip-tab-x.ask');
+      if (b) paintX(b, false);
+    } catch (e) { /* 視窗關了就算了 */ }
+  }
+
   function renderTabsBar(root) {
     if (ids.length < 2) return;
     var d = win.document;
@@ -272,13 +293,17 @@
       });
       chip.appendChild(nm);
 
+      /* 移出要按兩下（261002b）：小視窗很小、✕ 容易誤按。
+         第一下變成「移出？」，ASK_MS 之內再按一次才移出；逾時或點別的地方就變回 ✕ */
       var x = d.createElement('button');
-      x.className = 'pip-tab-x';
-      x.textContent = '✕';
-      x.title = '從小視窗移出（卡片本身不會刪掉）';
+      paintX(x, askId === id);
       x.addEventListener('click', function (e) {
         e.stopPropagation();
-        remove(id);
+        if (askId === id) { clearAsk(); remove(id); return; }
+        clearAsk();
+        askId = id;
+        paintX(x, true);
+        askTimer = setTimeout(clearAsk, ASK_MS);
       });
       chip.appendChild(x);
       bar.appendChild(chip);
@@ -360,6 +385,7 @@
      失去焦點就把展開的私人項目收回去，只留名稱清單。
      卡片本身的鎖定狀態不動，回來點一下就展開，不必重打密碼。 */
   function onBlur() {
+    clearAsk();
     if (!ids.length) return;
     // TOTP 卡不在失焦時遮：使用者工作時一直在別的視窗輸入驗證碼（v4.26 改成按眼睛手動遮）。
     // 連結收藏（v4.35）展開的那幾筆收回去，放在小視窗裡的每一張都收
@@ -411,10 +437,16 @@
       w.addEventListener('resize', rememberSize);
       w.addEventListener('blur', onBlur);
       w.document.addEventListener('keydown', onKeyDown);
+      // 點到「移出？」以外的地方就收回（261002b）
+      w.document.addEventListener('pointerdown', function (e) {
+        var t = e.target;
+        if (askId !== null && !(t && t.closest && t.closest('.pip-tab-x.ask'))) clearAsk();
+      }, true);
     }
   }
 
   function onWinGone() {
+    clearAsk();
     win = null;
     ids = [];
     curId = null;
@@ -531,6 +563,7 @@
   }
 
   function close() {
+    clearAsk();
     if (win && !win.closed) {
       try { win.removeEventListener('pagehide', onWinGone); } catch (e) { /* 忽略 */ }
       win.close();

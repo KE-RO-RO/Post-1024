@@ -1454,7 +1454,8 @@
       row.className = 'lk-item' + (open ? ' open' : '');
 
       var head = document.createElement('div');
-      head.className = 'link-row';
+      // 整張卡片都沒有網址（只放帳密）就不會有勾選框，那一格不留（261002b：之前空一大格）
+      head.className = 'link-row' + (withUrl.length ? '' : ' no-check');
 
       /* 每一格都留著（沒東西時是空的 span）。這一列是 grid，
          少一個元素後面的欄位會整排遞補上來（11.24） */
@@ -1483,7 +1484,8 @@
           saveChecks(tab, ro);
         });
         head.appendChild(cb);
-      } else {
+      } else if (withUrl.length) {
+        // 同一張卡片裡別筆有勾選框：這一格留空，名稱才會跟別列對齊（11.24）
         head.appendChild(document.createElement('span')).className = 'link-check-gap';
       }
 
@@ -2358,17 +2360,78 @@
     });
   }
 
-  function tpTick() {
+  /* 計時器放在哪個視窗（261002b）：
+     原本一律用主視窗的 setInterval。主視窗被別的程式整個蓋住時，Chrome 把它當背景分頁，
+     計時器被壓到大約一分鐘一次——小視窗裡的驗證碼就跟著卡住（同事回報的問題）。
+     小視窗一直顯示在畫面上不會被壓，所以「小視窗裡有驗證碼」時，計時器改由小視窗來跑；
+     一樣只有一個計時器，主視窗與小視窗的列都由它一起更新。 */
+  var tpTimerWin = null;
+  var tpRehostQueued = false;
+
+  function tpLiveOnly() {
     // 已經不在畫面上的（重畫掉、小視窗關了、卡片鎖了）一律丟掉
     tpLive = tpLive.filter(function (l) { return l.row.isConnected && Vault.isCardUnlocked(l.tabId); });
-    if (!tpLive.length) { clearInterval(tpTimer); tpTimer = null; return; }
+    return tpLive.length > 0;
+  }
+
+  /** 有列在小視窗（別的 window）裡就用那個視窗，否則用主視窗 */
+  function tpHostWin() {
+    for (var i = 0; i < tpLive.length; i++) {
+      var v = tpLive[i].row.ownerDocument && tpLive[i].row.ownerDocument.defaultView;
+      if (v && v !== window && !v.closed) return v;
+    }
+    return window;
+  }
+
+  function tpStopTimer() {
+    if (tpTimer) {
+      try { (tpTimerWin || window).clearInterval(tpTimer); } catch (e) { /* 視窗已關，計時器跟著沒了 */ }
+    }
+    tpTimer = null;
+    tpTimerWin = null;
+  }
+
+  /** 視窗被點到、或從看不到變成看得到：馬上重算一次，不等下一秒 */
+  function tpKick() {
+    if (tpLiveOnly()) tpTick();
+  }
+
+  function tpWireKick(w) {
+    if (w.__snTpKick) return;
+    w.__snTpKick = true;
+    w.addEventListener('focus', tpKick);
+    w.document.addEventListener('visibilitychange', function () {
+      if (!w.document.hidden) tpKick();
+    });
+  }
+
+  function tpRehost() {
+    if (!tpLiveOnly()) { tpStopTimer(); return; }
+    var host = tpHostWin();
+    if (tpTimer && tpTimerWin === host && !host.closed) return;
+    tpStopTimer();
+    tpTimer = host.setInterval(tpTick, 1000);
+    tpTimerWin = host;
+    tpWireKick(host);
+  }
+
+  function tpTick() {
+    if (!tpLiveOnly()) { tpStopTimer(); return; }
+    // 小視窗開了或關了：換到該用的視窗上跑
+    if (tpHostWin() !== tpTimerWin) tpRehost();
     var now = Date.now();
     tpLive.forEach(function (l) { tpPaint(l, now); });
   }
 
+  /* 畫完這一輪才決定放哪個視窗：列是先建好、整塊接到小視窗之後才知道屬於誰。
+     用 microtask 而不是 setTimeout：主視窗被壓的時候 setTimeout 也會被拖慢 */
   function tpEnsureTimer() {
-    if (tpTimer) return;
-    tpTimer = setInterval(tpTick, 1000);
+    if (tpRehostQueued) return;
+    tpRehostQueued = true;
+    Promise.resolve().then(function () {
+      tpRehostQueued = false;
+      tpRehost();
+    });
   }
 
   function renderTotp(tab, body, ctx) {
