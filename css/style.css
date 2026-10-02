@@ -677,11 +677,17 @@ textarea.inline-edit, input.inline-edit {
    沒東西的格子也留著空的元素佔位（11.24）。 */
 .link-row {
   display: grid;
-  grid-template-columns: 16px 13px 24px minmax(60px, 1fr) minmax(0, auto) auto auto auto;
+  grid-template-columns: 16px 13px 14px minmax(60px, 1fr) minmax(0, auto) auto auto auto;
   align-items: center;
   gap: 6px;
   padding: 4px 2px;
 }
+/* 整張卡片都沒有網址（只放帳密）：沒有勾選框那一欄（261002b） */
+.link-row.no-check {
+  grid-template-columns: 16px 14px minmax(60px, 1fr) minmax(0, auto) auto auto auto;
+}
+/* 展開鈕只是一個小三角形，不用跟動作鈕一樣寬（261002b：原本 24px 看起來空一大格） */
+.card-body .link-row .pv-tri { width: 14px; }
 .link-check-gap, .pv-tri-gap, .icon-gap { display: block; }
 .icon-gap { width: 24px; }
 .link-row .lk-plain {
@@ -2513,21 +2519,34 @@ textarea,
   text-overflow: ellipsis;
   cursor: pointer;
 }
+/* 小視窗本來就小，✕ 也跟著縮（261002b：原本 20px，看起來大又容易誤按） */
 .pip-tab-x {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
-  margin-right: 4px;
+  width: 14px;
+  height: 14px;
+  margin-right: 5px;
   padding: 0;
   border: none;
   border-radius: 50%;
   background: none;
   color: var(--text-faint);
-  font-size: 10px;
-  line-height: 20px;
+  font-size: 8px;
+  line-height: 14px;
   cursor: pointer;
 }
 .pip-tab-x:hover { color: var(--danger-text); background: var(--danger-fill); }
+/* 按了一下：變成「移出？」，再按一次才移出 */
+.pip-tab-x.ask {
+  width: auto;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  color: var(--danger-text);
+  background: var(--danger-fill);
+}
 
 /* ============================================================
    v4.35：連結收藏的編輯彈窗——網址一列一條（網址＋備註）
@@ -2570,6 +2589,10 @@ textarea,
 .op-list { margin: 0; padding-left: 22px; }
 .op-list li { margin: 6px 0; }
 .op-list a { color: var(--accent); font-weight: 600; }
+.op-done { display: none; margin-left: 8px; font-size: 12px; color: var(--ok); }
+/* 開過的那幾條：打勾、變淡（261002c） */
+.op-list li.done .op-done { display: inline; }
+.op-list li.done a { color: var(--text-faint); font-weight: 400; }
 .op-url {
   display: block;
   font-size: 12px;
