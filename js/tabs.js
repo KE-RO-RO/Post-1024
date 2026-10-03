@@ -291,7 +291,7 @@
     if (DB.isVaultTab(tab) && Vault.isCardUnlocked(tab.id)) {
       /* TOTP 卡另外一顆眼睛：只是把數字遮起來／露出來，不用密碼（v4.26，使用者要的）。
          跟 ⦿「鎖定」分成兩顆——一個是暫時不給旁人看，一個是真的鎖上要密碼（11.1）。
-         以前是小視窗一失焦就自動遮，但他工作時一直在別的視窗輸入驗證碼，改成手動 */
+         以前是小視窗一失焦就自動遮，但他一直要在別的視窗輸入驗證碼，改成手動 */
       if (tab.type === 'totp') {
         var hid = !!tpHidden[tab.id];
         head.appendChild(svgIconBtn(hid ? EYE_OFF_SVG : EYE_SVG, hid ? '顯示' : '隱藏', function () {
@@ -594,9 +594,35 @@
     return firstLine(item.content);
   }
 
+  /* ============================================================
+     懶人欄位（v4.41，使用者 10/03）：貼一整列表格，自動填進欄位
+     ------------------------------------------------------------
+     剪貼簿有表格（text/html 的 <td>）就用它拆——儲存格裡的換行、按鈕文字都還在原本那一格；
+     沒有才用純文字的 Tab 分隔。只拆出一格的不攔，照一般貼上貼進游標那一欄。
+     ============================================================ */
+  function lazyCellsFromClipboard(cd) {
+    if (!cd) return [];
+    var html = '';
+    try { html = cd.getData('text/html') || ''; } catch (e) { html = ''; }
+    if (/<t[dh][\s>]/i.test(html) && typeof DOMParser !== 'undefined') {
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      var rows = Array.prototype.filter.call(doc.querySelectorAll('tr'), function (tr) {
+        return tr.querySelector('td');     // 只有表頭（th）的那一列跳過
+      });
+      if (rows.length) {
+        return Array.prototype.filter.call(rows[0].children, function (c) {
+          return /^T[DH]$/.test(c.tagName);
+        }).map(function (c) { return String(c.textContent || '').replace(/\s+/g, ' ').trim(); });
+      }
+    }
+    var text = '';
+    try { text = cd.getData('text/plain') || ''; } catch (e) { text = ''; }
+    return DB.lazyCellsFromText(text);
+  }
+
   function renderNoteForm(tab, item, box, ctx) {
     var fb = document.createElement('div');
-    fb.className = 'nf-body';
+    fb.className = 'nf-body' + (item.lazy ? ' nf-lazy' : '');
 
     if ((item.title || '').trim()) {
       var t = document.createElement('div');
@@ -687,13 +713,96 @@
       acts.appendChild(mg);
     }
 
+    if (item.lazy && !RO) {
+      var lm = document.createElement('button');
+      lm.className = 'nf-btn';
+      lm.textContent = '貼上對應';
+      lm.title = '教它認一種表格：貼一列範例，選每個欄位要拿第幾格';
+      lm.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (ctx.editLazyMaps) ctx.editLazyMaps(tab, item);
+      });
+      acts.appendChild(lm);
+    }
+
     var tip = document.createElement('span');
     tip.className = 'nf-hint';
-    tip.textContent = '複製不含標題，空欄位也會印';
+    tip.textContent = item.lazy
+      ? ((item.maps || []).length
+          ? '在這一筆按 Ctrl + V 貼一整列，自動填入（' + item.maps.length + ' 組對應）'
+          : (RO ? '還沒有對應，請到主視窗按「貼上對應」設定' : '先按「貼上對應」設定，之後貼一整列就自動填'))
+      : '複製不含標題，空欄位也會印';
     acts.appendChild(tip);
 
     fb.appendChild(acts);
     box.appendChild(fb);
+
+    if (!item.lazy) return;
+
+    /* 點這一筆的空白處也能貼：讓整塊可以拿到焦點，Ctrl + V 才會送到這裡 */
+    fb.tabIndex = 0;
+
+    function fillWith(map, cells) {
+      var vals = DB.lazyFill(item, map, cells);
+      var n = 0;
+      var next = {};
+      fields.forEach(function (f, i) {
+        next[f.id] = vals[f.id] || '';
+        if (next[f.id]) n++;
+        if (inputs[i]) inputs[i].value = next[f.id];
+      });
+      noteVals[item.id] = next;          // 整筆先清空再填（使用者選的）
+      var old = fb.querySelector('.lz-choose');
+      if (old) old.remove();
+      Clip.toast('已依「' + map.name + '」填入 ' + n + ' 個欄位', false, fb.ownerDocument);
+    }
+
+    function choose(list, cells) {
+      var old = fb.querySelector('.lz-choose');
+      if (old) old.remove();
+      var d = fb.ownerDocument;
+      var bar = d.createElement('div');
+      bar.className = 'lz-choose';
+      var lead = d.createElement('span');
+      lead.textContent = '這一列像好幾組，選一個：';
+      bar.appendChild(lead);
+      list.forEach(function (m) {
+        var b = d.createElement('button');
+        b.type = 'button';
+        b.className = 'nf-btn';
+        b.textContent = m.name;
+        b.addEventListener('click', function (e) { e.stopPropagation(); fillWith(m, cells); });
+        bar.appendChild(b);
+      });
+      var x = d.createElement('button');
+      x.type = 'button';
+      x.className = 'nf-btn';
+      x.textContent = '取消';
+      x.addEventListener('click', function (e) { e.stopPropagation(); bar.remove(); });
+      bar.appendChild(x);
+      fb.insertBefore(bar, fb.firstChild);
+    }
+
+    fb.addEventListener('paste', function (e) {
+      var cells = lazyCellsFromClipboard(e.clipboardData);
+      if (cells.length < 2) return;      // 只有一格：照一般貼上，貼進游標那一欄
+      e.preventDefault();
+      e.stopPropagation();
+      var d = fb.ownerDocument;
+      if (!(item.maps || []).length) {
+        Clip.toast(RO ? '這一筆還沒有對應，請到主視窗按「貼上對應」設定'
+                      : '這一筆還沒有對應，請先按「貼上對應」設定', true, d);
+        return;
+      }
+      var r = DB.lazyMatch(item, cells);
+      if (!r) {
+        Clip.toast('認不出這一列（' + cells.length + ' 格）是哪一組對應。' +
+          (RO ? '請到主視窗的「貼上對應」新增一組' : '請用「貼上對應」新增一組'), true, d);
+        return;
+      }
+      if (r.choices) { choose(r.choices, cells); return; }
+      fillWith(r.map, cells);
+    });
   }
 
   function renderNote(tab, body, ctx) {
@@ -2426,7 +2535,7 @@
 
   /* 計時器放在哪個視窗（261002b）：
      原本一律用主視窗的 setInterval。主視窗被別的程式整個蓋住時，Chrome 把它當背景分頁，
-     計時器被壓到大約一分鐘一次——小視窗裡的驗證碼就跟著卡住（同事回報的問題）。
+     計時器被壓到大約一分鐘一次——小視窗裡的驗證碼就跟著卡住（使用者回報的問題）。
      小視窗一直顯示在畫面上不會被壓，所以「小視窗裡有驗證碼」時，計時器改由小視窗來跑；
      一樣只有一個計時器，主視窗與小視窗的列都由它一起更新。 */
   var tpTimerWin = null;
@@ -2742,6 +2851,7 @@
     iconBtn: iconBtn,
     // 置頂小視窗失去焦點時用：把展開的私人項目收回去（不解除卡片的鎖定狀態）
     collapsePrivate: forgetOpen,
+    lazyCellsFromClipboard: lazyCellsFromClipboard,
     fitNoteEditor: fitNoteEditor
   };
 })();

@@ -571,7 +571,7 @@
     clearAsk();
     composing = false;     // 視窗失焦時組字一定結束了；保險起見，避免卡在「先不重畫」
     if (!ids.length) return;
-    // TOTP 卡不在失焦時遮：使用者工作時一直在別的視窗輸入驗證碼（v4.26 改成按眼睛手動遮）。
+    // TOTP 卡不在失焦時遮：使用者一直要在別的視窗輸入驗證碼（v4.26 改成按眼睛手動遮）。
     // 連結收藏（v4.35）展開的那幾筆收回去，放在小視窗裡的每一張都收
     var any = false;
     ids.forEach(function (id) {

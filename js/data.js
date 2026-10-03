@@ -643,6 +643,13 @@
         if (out.kind === 'form') {
           out.title = typeof x.title === 'string' ? x.title : '';
           out.fields = normalizeNoteFields(x.fields);
+          /* 懶人欄位（v4.41）：借用欄位型別的格式存，多一個記號與對應規則。
+             舊版程式只認 kind 'form'——它讀到會當成一般欄位，標題與欄位都留著，
+             只是 lazy／maps 被丟掉（對應要重設），不會掉資料（11.63 的教訓） */
+          if (x.lazy === true) {
+            out.lazy = true;
+            out.maps = normalizeLazyMaps(x.maps, out.fields);
+          }
         }
         return out;
       });
@@ -677,6 +684,115 @@
       out.push({ id: id, label: label, def: typeof f.def === 'string' ? f.def : '' });
     });
     return out;
+  }
+
+  /* ============================================================
+     懶人欄位（v4.41，使用者 10/03）
+     ------------------------------------------------------------
+     從別的網頁反白複製一整列表格貼進來，依「對應」自動填進欄位。
+     一組對應 = { id, name, cols: 這一列有幾格, shapes: 每一格的長相, pick: { 欄位id: 第幾格 } }
+     - 存的只有格數、長相、第幾格對哪個欄位；**範例那一列不存**
+     - 欄位名、對應名都是使用者的資料，程式裡不出現任何特定用語
+     ============================================================ */
+  var LAZY_SHAPES = ['e', 'n', 'm', 'd', 'a', 'w', 't'];
+
+  /**
+   * 一格內容的「長相」，用來認出這一列是哪一組對應：
+   * e 空白、n 純數字、m 金額（有小數點或千分位）、d 日期、a 英文開頭接數字、
+   * w 其他英數字、t 其他文字（例如中文）
+   */
+  function lazyShape(v) {
+    v = String(v == null ? '' : v).trim();
+    if (!v) return 'e';
+    if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/.test(v)) return 'd';
+    if (/^\d+$/.test(v)) return 'n';
+    if (/^-?[\d,]*\d\.\d+$/.test(v) || /^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(v)) return 'm';
+    if (/^[A-Za-z]+[_-]?\d[\w-]*$/.test(v)) return 'a';
+    if (/^[\w.@-]+$/.test(v)) return 'w';
+    return 't';
+  }
+
+  function normalizeLazyMaps(arr, fields) {
+    if (!Array.isArray(arr)) return [];
+    var ids = {};
+    (fields || []).forEach(function (f) { ids[f.id] = true; });
+    var out = [];
+    arr.forEach(function (m) {
+      if (!m || typeof m !== 'object') return;
+      var cols = Math.floor(Number(m.cols));
+      if (!(cols >= 1 && cols <= 200)) return;
+      var shapes = Array.isArray(m.shapes) ? m.shapes.slice(0, cols).map(function (x) {
+        return LAZY_SHAPES.indexOf(x) >= 0 ? x : 't';
+      }) : [];
+      while (shapes.length < cols) shapes.push('t');
+      var pick = {};
+      if (m.pick && typeof m.pick === 'object') {
+        Object.keys(m.pick).forEach(function (fid) {
+          var n = Math.floor(Number(m.pick[fid]));
+          // 欄位被刪掉了、或格子超出範圍的就不留
+          if (ids[fid] && n >= 0 && n < cols) pick[fid] = n;
+        });
+      }
+      out.push({
+        id: typeof m.id === 'string' && m.id ? m.id : uid(),
+        name: String(m.name || '').trim() || ('對應 ' + (out.length + 1)),
+        cols: cols,
+        shapes: shapes,
+        pick: pick
+      });
+    });
+    return out;
+  }
+
+  /** 純文字貼上：第一個有內容的那一行，用 Tab 切。表格複製出來的純文字就是這樣 */
+  function lazyCellsFromText(text) {
+    var lines = String(text || '').replace(/\r/g, '').split('\n')
+      .filter(function (l) { return l.trim(); });
+    if (!lines.length) return [];
+    var cells = lines[0].split('\t').map(function (c) { return c.replace(/\s+/g, ' ').trim(); });
+    return cells;
+  }
+
+  /**
+   * 這一列是哪一組對應。先看格數，再看每一格的長相有幾格一樣。
+   * @returns {{ map: Object }|{ choices: Object[] }|null}
+   *   map：認得出來；choices：有兩組以上一樣像，讓使用者選；null：認不出來
+   */
+  function lazyMatch(item, cells) {
+    var maps = (item && item.maps) || [];
+    var shapes = (cells || []).map(lazyShape);
+    var scored = maps.filter(function (m) { return m.cols === shapes.length; }).map(function (m) {
+      var same = 0;
+      shapes.forEach(function (sh, i) { if (m.shapes[i] === sh) same++; });
+      return { map: m, score: same / shapes.length };
+    }).filter(function (x) { return x.score >= 0.6; })
+      .sort(function (a, b) { return b.score - a.score; });
+    if (!scored.length) return null;
+    var top = scored.filter(function (x) { return x.score === scored[0].score; });
+    if (top.length > 1) return { choices: top.map(function (x) { return x.map; }) };
+    return { map: scored[0].map };
+  }
+
+  /** 依對應算出每個欄位要填什麼。對應不到的欄位是空白（使用者選的：整筆先清空再填） */
+  function lazyFill(item, map, cells) {
+    var vals = {};
+    (item.fields || []).forEach(function (f) {
+      var n = map.pick[f.id];
+      vals[f.id] = typeof n === 'number' && cells[n] != null ? String(cells[n]).trim() : '';
+    });
+    return vals;
+  }
+
+  /** 存一組對應。範例那一列只拿來算格數與長相，不存 */
+  function lazyMakeMap(name, cells, pick, oldId) {
+    var cols = cells.length;
+    var p = {};
+    Object.keys(pick || {}).forEach(function (fid) {
+      var n = Math.floor(Number(pick[fid]));
+      if (n >= 0 && n < cols) p[fid] = n;
+    });
+    return { id: oldId || uid(), name: String(name || '').trim() || '未命名', cols: cols,
+             shapes: cells.map(lazyShape), pick: p };
   }
 
   /** 欄位名與預設值之間的分隔：全形或半形冒號，取第一個 */
@@ -2848,6 +2964,12 @@
     isShareData: isShareData,
     previewShare: previewShare,
     importCards: importCards,
+    lazyShape: lazyShape,
+    lazyCellsFromText: lazyCellsFromText,
+    lazyMatch: lazyMatch,
+    lazyFill: lazyFill,
+    lazyMakeMap: lazyMakeMap,
+    normalizeLazyMaps: normalizeLazyMaps,
     PALETTE: PALETTE,
     paletteName: paletteName,
     TYPE_COLOR: TYPE_COLOR,
