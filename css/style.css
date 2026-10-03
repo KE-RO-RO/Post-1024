@@ -1619,7 +1619,7 @@ body.drawer-open #app { margin-right: 356px; }
    方向是刻意的——日後新增卡片類型時忘了標記，只會少一顆按鈕，
    不會在唯讀的小視窗裡冒出一顆刪除鍵（對照 11.3 的列舉法問題） */
 #pipRoot .icon-btn:not(.pip-ok),
-#pipRoot .row-add,
+#pipRoot .row-add:not(.pip-ok),
 #pipRoot .color-dot { display: none; }
 
 /* 把手改用 visibility 而不是 display:none。
@@ -1828,6 +1828,33 @@ body.drawer-open #app { margin-right: 356px; }
   max-height: none !important;
   overflow: visible;
 }
+
+/* 小視窗裡的自由格式便籤：內容區本身就是輸入框（261003b，參考 Windows 便籤）。
+   平常看起來跟顯示狀態一樣（沒有框線），游標進來才有一圈淡淡的框，提示「正在打字」。
+   高度由程式跟著內容長，不出現自己的捲動條、也不給拖拉角 */
+.nt-pip-edit {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 2.6em;
+  margin: 0;
+  padding: 2px 6px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow: hidden;
+  resize: none;
+  outline: none;
+}
+.nt-pip-edit:hover { border-color: var(--border); }
+.nt-pip-edit:focus { border-color: var(--accent-line); background: var(--field-bg); }
+.nt-pip-edit::placeholder { color: var(--text-faint); }
+.pip-ask-msg { color: var(--text-dim); font-size: 13px; line-height: 1.6; }
 
 .clear-done { margin-top: 4px; color: var(--text-faint); }
 .clear-done:hover { color: var(--danger); border-color: var(--danger); }
@@ -2505,6 +2532,9 @@ textarea,
   color: var(--text-dim);
 }
 .pip-tab.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--text); }
+/* 拖曳排序中（261003b）：拿起來的那一顆半透明、虛線框 */
+.pip-tab.dragging { opacity: .55; border-style: dashed; }
+.pip-tab.dragging .pip-tab-name { cursor: grabbing; }
 .pip-tab-name {
   min-width: 0;
   padding: 4px 4px 4px 10px;
