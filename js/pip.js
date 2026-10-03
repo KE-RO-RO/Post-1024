@@ -52,6 +52,10 @@
   var composing = false;
   var renderPending = false;
 
+  /* 重畫後要把游標放回哪個輸入框（data-keep 的值）。
+     重建前游標在有 data-keep 的框裡就記下來；剛新增一筆便籤時也用它把游標放進去 */
+  var focusKeep = null;
+
   /* 只有 Document PiP 有「浮在最上層」。這是規範強制的，
      requestWindow() 只有 width、height、disallowReturnToOpener、
      preferInitialWindowPlacement 四個選項，沒有開關可以關掉置頂。
@@ -123,6 +127,44 @@
    * 不能直接呼叫主視窗的解鎖彈窗——主視窗這時多半被其他視窗蓋住，
    * 密碼框會跳在使用者看不到的地方，看起來就像按了沒反應。
    */
+  /** 小視窗自己的確認框（261003b：小視窗裡刪便籤一筆）。樣子跟輸入主密碼那個一樣 */
+  function askConfirm(title, message, onOk) {
+    var d = win.document;
+    if (d.querySelector('.pip-ask')) return;
+    var wrap = d.createElement('div');
+    wrap.className = 'pip-ask';
+    var box = d.createElement('div');
+    box.className = 'pip-ask-box';
+    wrap.appendChild(box);
+    var h = d.createElement('h3');
+    h.textContent = title;
+    box.appendChild(h);
+    var msg = d.createElement('div');
+    msg.className = 'pip-ask-msg';
+    msg.textContent = String(message || '').replace(/<br\s*\/?>/g, '') + '此動作無法復原。';
+    box.appendChild(msg);
+    var row = d.createElement('div');
+    row.className = 'pip-ask-row';
+    box.appendChild(row);
+    function close() { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); }
+    var cancel = d.createElement('button');
+    cancel.className = 'btn-plain';
+    cancel.textContent = '取消';
+    cancel.addEventListener('click', close);
+    row.appendChild(cancel);
+    var ok = d.createElement('button');
+    ok.className = 'btn-danger';
+    ok.textContent = '確定刪除';
+    ok.addEventListener('click', function () { close(); onOk(); });
+    row.appendChild(ok);
+    wrap.addEventListener('keydown', function (e) {
+      e.stopPropagation();
+      if (e.key === 'Escape') close();
+    });
+    d.body.appendChild(wrap);
+    cancel.focus();      // 預設焦點放在「取消」：手滑按 Enter 不會刪掉
+  }
+
   function askPassword(tab) {
     var d = win.document;
     if (d.querySelector('.pip-ask')) return;
@@ -218,7 +260,8 @@
       }
       hotkeys[key] = { row: row, el: el };
     },
-    confirmDelete: noop,
+    // 便籤在小視窗裡可以刪一筆（261003b）：主視窗的彈窗在這裡看不到，確認框自己畫
+    confirmDelete: function (title, message, onOk) { askConfirm(title, message, onOk); },
     confirmDeletePrivate: noop,
     privateEntries: function (tab) { return ui.privateEntries(tab); },
     setPrivateEntries: noop,
@@ -232,8 +275,19 @@
     attachNoteDrag: noop,
     attachItemDrag: noop,
     movePrivate: noop,
-    // 便籤的新增與「管理欄位」都在主視窗做；小視窗只能填值與複製
-    editNoteItem: noop,
+    /* 便籤（261003b，使用者 10/03）：小視窗裡可以直接新增一筆自由格式並開始打字；
+       「管理欄位」與新增欄位型別還是在主視窗（小視窗跳不出選型別的彈窗） */
+    editNoteItem: function (tab, item) {
+      if (item) return;
+      var it = { id: DB.uid(), kind: 'free', content: '', open: true, order: (tab.items || []).length };
+      tab.items = tab.items || [];
+      tab.items.push(it);
+      tab.updatedAt = DB.nowIso();
+      focusKeep = 'note:' + it.id;     // 畫好之後游標放進新的那一筆
+      DB.touch();
+    },
+    // 小視窗裡打字：主視窗那張稍後跟上（不重畫小視窗本身）
+    noteEdited: function (tab) { if (ui.notePipEdited) ui.notePipEdited(tab); },
     editTotp: noop,
     clockSkew: function () { return ui.clockSkew ? ui.clockSkew() : null; },
     // TOTP 卡的名稱搜尋：小視窗裡也要能打字（使用者 10/01 要的），比對規則跟主視窗同一套
@@ -285,7 +339,16 @@
     } catch (e) { /* 視窗關了就算了 */ }
   }
 
+  /* 名稱那一排拖曳排序（261003b，使用者 10/03）。
+     按住名稱左右拖，放開換位置；移動不到 TAB_DRAG_PX 還是當成「點一下切換」。
+     ✕ 不能拖（它是按兩下移出，跟拖曳分開，11.1）。
+     順序就是 ids 的順序，只記在記憶體——放哪幾張本來就只記到小視窗關掉為止。 */
+  var TAB_DRAG_PX = 5;
+  var tabDrag = null;          // { chip, x0, moved }
+  var tabClickBlockUntil = 0;  // 剛拖完放開的那一下不要當成點名稱
+
   function renderTabsBar(root) {
+    tabDrag = null;   // 重畫時正在拖的那一顆已經不在了
     if (ids.length < 2) return;
     var d = win.document;
     var bar = d.createElement('div');
@@ -303,10 +366,60 @@
       nm.textContent = t.title || '未命名';
       nm.title = t.title || '未命名';
       nm.addEventListener('click', function () {
+        if (Date.now() < tabClickBlockUntil) return;
         if (curId === id) return;
         curId = id;
         render();
       });
+      /* 移動與放開聽整份文件：把名稱搬到新位置時（insertBefore）瀏覽器會解除按鈕的
+         setPointerCapture，之後的 pointermove 就收不到了 */
+      nm.addEventListener('pointerdown', function (e) {
+        if (e.button !== 0) return;
+        tabDrag = { chip: chip, x0: e.clientX, moved: false };
+        d.addEventListener('pointermove', onMove, true);
+        d.addEventListener('pointerup', endDrag, true);
+        d.addEventListener('pointercancel', endDrag, true);
+      });
+      var onMove = function (e) {
+        var g = tabDrag;
+        if (!g || g.chip !== chip) return;
+        if (!g.moved) {
+          if (Math.abs(e.clientX - g.x0) < TAB_DRAG_PX) return;
+          g.moved = true;
+          chip.classList.add('dragging');
+          clearAsk();
+        }
+        // 插到第一個「中線在游標右邊」的名稱前面；都沒有就放最後
+        var before = null;
+        Array.prototype.some.call(bar.children, function (c) {
+          if (c === chip) return false;
+          var r = c.getBoundingClientRect();
+          if (e.clientX < r.left + r.width / 2) { before = c; return true; }
+          return false;
+        });
+        if (before) { if (chip.nextSibling !== before) bar.insertBefore(chip, before); }
+        else if (bar.lastChild !== chip) bar.appendChild(chip);
+        // 拖到這一排的兩端時，這一排自己往那邊捲
+        var bb = bar.getBoundingClientRect();
+        if (e.clientX < bb.left + 16) bar.scrollLeft -= 8;
+        else if (e.clientX > bb.right - 16) bar.scrollLeft += 8;
+      };
+      var endDrag = function () {
+        d.removeEventListener('pointermove', onMove, true);
+        d.removeEventListener('pointerup', endDrag, true);
+        d.removeEventListener('pointercancel', endDrag, true);
+        var g = tabDrag;
+        if (!g || g.chip !== chip) return;
+        tabDrag = null;
+        if (!g.moved) return;
+        tabClickBlockUntil = Date.now() + 300;
+        var order = Array.prototype.map.call(bar.children, function (c) { return c.dataset.tabId; });
+        ids = order.map(function (k) {
+          for (var i = 0; i < ids.length; i++) if (String(ids[i]) === k) return ids[i];
+          return null;
+        }).filter(function (k) { return k !== null; });
+        render();     // 主視窗不用跟著重畫：它只關心「哪幾張在小視窗裡」，順序跟它無關
+      };
       chip.appendChild(nm);
 
       /* 移出要按兩下（261002b）：小視窗很小、✕ 容易誤按。
@@ -365,16 +478,22 @@
     // 重建前：記下捲到哪裡、游標是不是在 TOTP 搜尋框（261003a）
     var sc = d.body;    // 小視窗是 body 在捲（style.css 的 :root[data-pip] body）
     if (shownId !== null && shownDoc === d && !scrollShort) pipScroll[shownId] = sc.scrollTop;
-    var ae = d.activeElement, keepSearch = null;
-    if (ae && ae.classList && ae.classList.contains('tp-search')) {
-      keepSearch = { s: ae.selectionStart, e: ae.selectionEnd };
+    /* 游標在可以接回的輸入框裡（TOTP 搜尋框、小視窗的便籤）：記下是哪一個、選取到哪裡 */
+    var ae = d.activeElement, keep = null;
+    if (focusKeep) {
+      keep = { key: focusKeep, s: null, e: null };     // 剛新增的那一筆優先
+    } else if (ae && ae.dataset && ae.dataset.keep) {
+      keep = { key: ae.dataset.keep, s: ae.selectionStart, e: ae.selectionEnd };
     }
+    focusKeep = null;
 
     root.innerHTML = '';
     hotkeys = {};
     renderTabsBar(root);
     var card = Tabs.renderCard(tab, pipCtx);
     root.appendChild(card);
+    // 小視窗的便籤編輯框：接進來之後才量得到內容高度（261003b）
+    Array.prototype.forEach.call(root.querySelectorAll('.nt-pip-edit'), Tabs.fitNoteEditor);
 
     /* 重建後：接回捲動位置。以前沒有這一步，內容一變短（「讀取中…」、名稱那一排的捲動）
        就停在最上面 */
@@ -396,11 +515,13 @@
     /* 游標放回搜尋框（問題 3：小視窗搜尋時主視窗剛好重畫——剛登入時的解密、下載——
        搜尋框被換成新的、游標掉了，接著按刪除鍵沒反應，畫面卡在搜尋結果）。
        新的搜尋框已經帶著原本打的字，這裡只把游標與選取範圍接回去 */
-    if (keepSearch) {
-      var ns = root.querySelector('.tp-search');
+    if (keep) {
+      var ns = Array.prototype.filter.call(root.querySelectorAll('[data-keep]'),
+        function (x) { return x.dataset.keep === keep.key; })[0];
       if (ns) {
-        try { ns.focus({ preventScroll: true }); } catch (e) { ns.focus(); }
-        try { ns.setSelectionRange(keepSearch.s, keepSearch.e); } catch (e) { /* 舊瀏覽器不支援就算了 */ }
+        try { ns.focus({ preventScroll: keep.s !== null }); } catch (e) { ns.focus(); }
+        var at = keep.s === null ? ns.value.length : keep.s;
+        try { ns.setSelectionRange(at, keep.e === null ? at : keep.e); } catch (e) { /* 舊瀏覽器不支援就算了 */ }
       }
     }
 

@@ -734,6 +734,7 @@
         DB.touch();
       }, 'nt-tri pip-ok'));
 
+      // 小視窗裡也能刪（261003b，使用者 10/03 選的；確認框由小視窗自己畫）
       head.appendChild(iconBtn('✕', '刪除這一筆', function () {
         ctx.confirmDelete(
           '刪除便籤',
@@ -746,12 +747,14 @@
             DB.touch();
           }
         );
-      }, 'danger-btn'));
+      }, 'danger-btn pip-ok'));
 
       wrap.appendChild(head);
 
       if (open && isForm) {
         renderNoteForm(tab, item, wrap, ctx);
+      } else if (open && RO) {
+        renderNotePipEditor(tab, item, wrap, ctx);
       } else if (open) {
         var p = document.createElement('div');
         p.className = 'nt-body';
@@ -794,10 +797,48 @@
     /* 新增時先選型別（自由格式／欄位），比照私人卡片每一筆各自選（9.9）。
        彈窗由 app.js 畫，樣子才會跟其他編輯視窗一致。 */
     var add = document.createElement('button');
-    add.className = 'row-add';
+    add.className = 'row-add pip-ok';
     add.textContent = '＋ 新增一筆';
+    // 小視窗跳不出選型別的彈窗：直接新增一筆自由格式（要欄位型別請到主視窗）
+    if (RO) add.title = '新增一筆自由格式；欄位型別請到主視窗新增';
     add.addEventListener('click', function () { ctx.editNoteItem(tab, null); });
     body.appendChild(add);
+  }
+
+  /**
+   * 小視窗裡的自由格式便籤：內容區本身就是輸入框（261003b，使用者 10/03 選的，參考 Windows 便籤）。
+   * 點哪裡游標就在哪裡、直接打字、自動存，沒有「點一下才進編輯」的切換。
+   * - 每打一個字就寫回記憶體並 touch(true)：分頁暫存 1 秒後落盤、雲端停手 10 秒上傳，跟主視窗一樣
+   * - 不重畫小視窗（重建會把游標與 Ctrl+Z 的紀錄弄掉）；主視窗那張由 ctx.noteEdited 稍後跟上
+   * - 高度跟著內容長，不另外出現捲動條：小視窗本身就會捲（11.68 那套捲動位置接回）
+   * - data-keep 讓小視窗重畫時找得回這個框，把游標放回去
+   */
+  /** 輸入框高度跟著內容：scrollHeight 不含框線，box-sizing 是 border-box，要把框線加回去 */
+  function fitNoteEditor(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = (ta.scrollHeight + ta.offsetHeight - ta.clientHeight) + 'px';
+  }
+
+  function renderNotePipEditor(tab, item, wrap, ctx) {
+    var ta = document.createElement('textarea');
+    ta.className = 'nt-pip-edit';
+    ta.value = item.content || '';
+    ta.placeholder = '在這裡打字…';
+    ta.spellcheck = false;
+    ta.rows = 3;
+    ta.dataset.keep = 'note:' + item.id;
+    function fit() { fitNoteEditor(ta); }
+    ta.addEventListener('input', function () {
+      item.content = ta.value;
+      tab.updatedAt = DB.nowIso();
+      DB.touch(true);
+      if (ctx.noteEdited) ctx.noteEdited(tab);
+      fit();
+    });
+    // 按鍵不要漏到小視窗的複製鍵去
+    ta.addEventListener('keydown', function (e) { e.stopPropagation(); });
+    wrap.appendChild(ta);
+    // 第一次的高度由 pip.js 在整張卡片接進小視窗之後量（這裡還沒掛上畫面，量不到）
   }
 
   /* ---------- 常用語（核心） ---------- */
@@ -2512,6 +2553,7 @@
       search = document.createElement('input');
       search.type = 'search';
       search.className = 'tp-search';
+      search.dataset.keep = 'tpsearch:' + tab.id;   // 小視窗重畫時找得回來、把游標放回去（11.68）
       search.placeholder = '搜尋名稱（Enter 複製第一個）';
       search.autocomplete = 'off';
       search.spellcheck = false;
@@ -2690,6 +2732,7 @@
     makeEditable: makeEditable,
     iconBtn: iconBtn,
     // 置頂小視窗失去焦點時用：把展開的私人項目收回去（不解除卡片的鎖定狀態）
-    collapsePrivate: forgetOpen
+    collapsePrivate: forgetOpen,
+    fitNoteEditor: fitNoteEditor
   };
 })();

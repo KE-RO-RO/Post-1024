@@ -1924,7 +1924,8 @@
         user: user.value.trim(),
         pass: pass.value,
         note: note.value.trim(),
-        off: isNew ? false : item.off === true
+        // 新增的一筆預設不勾（261003b，使用者 10/03）：要開的時候再自己勾
+        off: isNew ? true : item.off === true
       });
       if (!payload.name && !payload.urls.length && !payload.user && !payload.pass && !payload.note) {
         Clip.toast('什麼都還沒填', true);
@@ -2957,6 +2958,19 @@
     });
   }
 
+  /* 小視窗裡打便籤（261003b）：主視窗那張要跟上，但不能回頭重畫小視窗——
+     重建會把正在打字的框換掉（游標、Ctrl+Z 的紀錄都沒了）。停手 400ms 才畫一次主視窗 */
+  var skipPipOnce = false;
+  var notePipTimer = null;
+  function notePipEdited() {
+    if (notePipTimer) clearTimeout(notePipTimer);
+    notePipTimer = setTimeout(function () {
+      notePipTimer = null;
+      skipPipOnce = true;
+      try { render(); } finally { skipPipOnce = false; }
+    }, 400);
+  }
+
   var pipRenderTimer = null;
   function schedulePipRender() {
     if (pipRenderTimer || !PiP.mode()) return;
@@ -2979,7 +2993,7 @@
     renderSidebar();
     renderContent();
     // 小視窗排在最後：主題與自訂配色都套好了，抄過去才是對的
-    PiP.render();
+    if (!skipPipOnce) PiP.render();
     scheduleDueCheck();
     maybeWarnQuota();   // 自己有節流，不會每次重繪都去掃儲存空間
   }
@@ -3888,13 +3902,15 @@
      '複製鍵在同一個分類裡不能重複；內容太長時只顯示兩行，按 ▾ 看全文'],
     ['便籤', '隨手記事，或一張固定格式的單子',
      '自由文字直接打；「欄位」型設好欄位名後，每次填值、一鍵複製、一鍵清空',
-     '複製只帶欄位內容、不帶標題；一鍵清空會清成空白；改欄位名要從「管理欄位」'],
+     '複製只帶欄位內容、不帶標題；一鍵清空會清成空白；改欄位名要從「管理欄位」；' +
+     '彈成小視窗時自由文字直接打、自動存，也能新增與刪除一筆（欄位型要回主視窗新增）；' +
+     '刪掉的「一筆」不會進最近刪除（最近刪除只收整張卡片）'],
     ['待辦', '要做的事，可以加日期倒數',
      '「＋ 新增任務」打名稱按 Enter 就好；要倒數就填日期（可加時間）；點右邊的小標可以改日期',
      '有日期的排上面、依日期排，到期當天變紅；沒日期的排下面，順序自己拖；' +
      '有日期的同一天才能拖曳排序；有日期的勾完會沉到「已完成」'],
     ['連結收藏', '常用網址，也可以記帳號密碼與備忘',
-     '點名稱開第一條網址；勾選多個一次開；複製鈕複製第一條；▸ 展開看其他網址、帳號、密碼、備忘；' +
+     '點名稱開第一條網址；勾選多個一次開（新加的一筆預設不勾）；複製鈕複製第一條；▸ 展開看其他網址、帳號、密碼、備忘；' +
      '「複製開啟連結」貼到另一個瀏覽器設定檔的網址列，就會開出勾選的網址（那邊不用登入）',
      '一筆可以放好幾條網址，每條可以寫備註；一次開很多分頁可能被瀏覽器擋，⋯ 選單有解法；' +
      '可以從 ⋯ 選單加上密碼保護：加密的卡片標題旁有小鎖頭，要主密碼才打得開、解開 10 分鐘自動鎖定、' +
@@ -3929,7 +3945,7 @@
       '<b>加卡片</b>：右上角「＋ 新增卡片」，挑一種卡片',
       '<b>開始用</b>：點常用語的一列就複製，到要用的地方按 Ctrl + V',
       '<b>要一直看著的卡片</b>：卡片標題列的彈出鈕（加密的連結收藏、TOTP 卡在 ⋯ 裡）→ 變成浮在最上層的小視窗；' +
-        '再按別張的彈出鈕會加進同一個小視窗，上面一排名稱切換'
+        '再按別張的彈出鈕會加進同一個小視窗，上面一排名稱切換、按住名稱左右拖可以換順序'
     ], true);
 
     sec('卡片說明');
@@ -4136,6 +4152,7 @@
     /* 置頂小視窗需要主程式這幾樣能力。用注入而不是直接呼叫，
        是為了讓 pip.js 可以排在 app.js 前面載入（它只依賴 DB／Vault／Clip／Tabs） */
     PiP.setUI({
+      notePipEdited: notePipEdited,
       openLinks: openLinks,
       lockCard: lockCard,
       privateEntries: privateEntries,
