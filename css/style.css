@@ -2674,3 +2674,50 @@ textarea,
 .share-list { margin: 8px 0 10px; padding-left: 20px; }
 .share-list li { margin: 2px 0; color: var(--text); }
 .share-list small { margin-left: 4px; color: var(--text-faint); }
+
+/* ============================================================
+   懶人欄位（v4.41）：貼一整列自動填
+   ============================================================ */
+/* 整塊可以拿到焦點（點空白處再 Ctrl + V）；拿到焦點時給一圈淡框，看得出「貼在這裡」 */
+.nf-lazy { outline: none; border-radius: var(--radius-sm); }
+.nf-lazy:focus-within { box-shadow: 0 0 0 1px var(--accent-line); }
+.lz-choose {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: 0 0 8px; padding: 6px 8px;
+  border: 1px dashed var(--accent-line); border-radius: var(--radius-sm);
+  color: var(--text-dim); font-size: 12.5px;
+}
+
+/* 「貼上對應」彈窗 */
+.lz-list { margin-bottom: 8px; }
+.lz-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 0; border-bottom: 1px solid var(--border);
+}
+.lz-row .lz-name { font-weight: 600; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lz-row small { flex: 1; color: var(--text-faint); }
+.lz-row .lz-del { color: var(--danger); }
+.lz-edit {
+  margin: 4px 0 10px; padding: 10px 12px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--raise-xs);
+}
+.lz-zone {
+  margin-bottom: 10px; padding: 12px;
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+  color: var(--text-dim); font-size: 12.5px; text-align: center;
+  cursor: text; outline: none;
+}
+.lz-zone:focus { border-color: var(--accent-line); background: var(--field-bg); }
+.lz-grid {
+  display: grid; grid-template-columns: minmax(70px, max-content) 1fr;
+  gap: 6px 10px; align-items: center; margin-bottom: 10px;
+}
+.lz-label { color: var(--text-dim); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lz-sel {
+  width: 100%; min-width: 0; padding: 5px 8px;
+  background: var(--field-bg); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  font: inherit; font-size: 12.5px;
+}
+.lz-edit-acts { display: flex; justify-content: flex-end; gap: 8px; }
