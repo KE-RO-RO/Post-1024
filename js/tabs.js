@@ -620,11 +620,12 @@
     return DB.lazyCellsFromText(text);
   }
 
-  function renderNoteForm(tab, item, box, ctx) {
+  function renderNoteForm(tab, item, box, ctx, titleInHead) {
     var fb = document.createElement('div');
     fb.className = 'nf-body' + (item.lazy ? ' nf-lazy' : '');
 
-    if ((item.title || '').trim()) {
+    // 標題已經寫在 ⠿ ▾ 那一列（261003f），內容區不再重複
+    if (!titleInHead && (item.title || '').trim()) {
       var t = document.createElement('div');
       t.className = 'nf-title';
       setText(t, item.title.trim());
@@ -815,7 +816,12 @@
       var isForm = item.kind === 'form';
 
       var wrap = document.createElement('div');
-      wrap.className = 'nt-item' + (open ? ' open' : '') + (isForm ? ' nt-form' : '');
+      /* 展開時不另外空一列（261003f，使用者 10/03 選方案 B）：
+         有標題的欄位型，標題寫在 ⠿ ▾ 那一列；自由格式與沒標題的，那一列疊在內容第一行的左右兩側 */
+      var titleText = isForm ? (item.title || '').trim() : '';
+      var overlay = open && !titleText;
+      wrap.className = 'nt-item' + (open ? ' open' : '') + (isForm ? ' nt-form' : '') +
+        (overlay ? ' nt-overlay' : '');
 
       var head = document.createElement('div');
       head.className = 'nt-head';
@@ -839,6 +845,10 @@
       summary.className = 'nt-summary';
       if (!open) {
         setText(summary, isForm ? noteFormSummary(item) : firstLine(item.content), '還沒有內容');
+      } else if (titleText) {
+        setText(summary, titleText);
+        summary.classList.add('nt-sum-title');
+        summary.title = titleText;
       }
       head.appendChild(summary);
 
@@ -870,7 +880,7 @@
       wrap.appendChild(head);
 
       if (open && isForm) {
-        renderNoteForm(tab, item, wrap, ctx);
+        renderNoteForm(tab, item, wrap, ctx, !!titleText);
       } else if (open && RO) {
         renderNotePipEditor(tab, item, wrap, ctx);
       } else if (open) {
