@@ -2721,3 +2721,44 @@ textarea,
   font: inherit; font-size: 12.5px;
 }
 .lz-edit-acts { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ============================================================
+   便籤展開時不另外空一列（261003f，使用者 10/03 選方案 B）
+   ------------------------------------------------------------
+   以前展開時 ⠿ ▾ ✕ 那一列是空的（名稱在底下的內容區），每一筆都多頂著一條空白。
+   - 有標題的欄位型：標題寫進那一列（.nt-sum-title），內容區不再重複
+   - 自由格式與沒標題的：那一列改成疊在內容第一行上（.nt-overlay），
+     ⠿ 在左、▾ ✕ 在右，內容讓出左右兩邊的位置
+   ============================================================ */
+.nt-item.open .nt-summary.nt-sum-title {
+  font-weight: 700;
+  color: var(--text);
+  cursor: default;
+}
+
+.nt-item.nt-overlay { position: relative; }
+.nt-item.nt-overlay > .nt-head {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  padding: 0 4px 0 0;
+  background: none;
+  pointer-events: none;      /* 中間空的地方讓點擊穿過去，點得到底下的內容 */
+}
+.nt-item.nt-overlay > .nt-head:hover { background: none; }
+.nt-item.nt-overlay > .nt-head > * { pointer-events: auto; }
+.nt-item.nt-overlay > .nt-head > .nt-summary { visibility: hidden; pointer-events: none; }
+
+/* 左邊讓給 ⠿（16px），右邊讓給 ▾ ✕（兩顆 24px＋間距＋邊距＝56px，多留一點） */
+.nt-item.nt-overlay > .nt-body { padding: 4px 60px 6px 18px; }
+.nt-item.nt-overlay > .nf-body { padding-left: 18px; padding-top: 2px; }
+/* 沒標題的欄位型：只有第一欄的輸入框讓出右邊，其他欄照舊對齊 */
+.nt-item.nt-overlay > .nf-body .nf-rows > .nf-input:first-of-type { width: calc(100% - 56px); }
+/* 小視窗的自由格式（一直是輸入框） */
+.nt-item.nt-overlay > .nt-pip-edit {
+  width: calc(100% - 18px);
+  margin-left: 18px;
+  padding-right: 60px;
+}
