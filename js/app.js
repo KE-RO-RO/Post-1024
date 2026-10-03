@@ -1150,7 +1150,10 @@
 
     function save() {
       var nm = name.value.trim();
-      var list = (privateEntries(tab) || []).slice();
+      var cur = livePrivate(tab);
+      if (!cur) return;
+      tab = cur;
+      var list = privateEntries(tab).slice();
       if (!isNew) {
         list = list.map(function (x) {
           if (x.id !== item.id) return x;
@@ -1658,6 +1661,28 @@
     else tab.entries = list;
   }
 
+  /**
+   * 存之前換成「現在資料裡的那一張」（261003a 修正）。
+   *
+   * 彈窗開著、或確認框還沒按的時候，雲端同步可能把整份資料換掉（剛登入時的自動同步最常見）：
+   * 手上的 tab 變成已經不在資料裡的舊物件，加密卡片的明文也被丟掉、正在重新解密。
+   * 以前照樣存——寫到舊物件上等於沒存（畫面看得到、重新整理就不見），
+   * 明文還沒解回來時更會當成「空的」只存下新加的那一筆。
+   * @returns 可以存的那一張；不能存時跳提示、回 null（呼叫端不要關彈窗，讓使用者再按一次）
+   */
+  function livePrivate(tab) {
+    var cur = DB.findTab(tab.id);
+    if (!cur) {
+      Clip.toast('這張卡片已經不在了（可能在另一台刪掉了），這次的內容沒有存', true);
+      return null;
+    }
+    if (privateEntries(cur)) return cur;
+    Clip.toast(Vault.isCardUnlocked(cur.id)
+      ? '卡片剛從雲端更新、正在重新讀取，請過一兩秒再按一次'
+      : '卡片已經鎖定，這次的內容沒有存。請先解鎖再做一次', true);
+    return null;
+  }
+
   /** 編輯單筆。item 為 null 代表新增。 */
   /**
    * 刪除私人內容前先驗身分。
@@ -1888,7 +1913,10 @@
     }
 
     function save() {
-      var list = privateEntries(tab) || [];
+      var cur = livePrivate(tab);   // 彈窗開著時雲端可能換過整份資料（261003a）
+      if (!cur) return;
+      tab = cur;
+      var list = privateEntries(tab);
       var payload = DB.normalizeLinkEntry({
         id: isNew ? DB.uid() : item.id,
         name: name.value.trim(),
@@ -2189,7 +2217,9 @@
 
   /** 私人卡片的一筆換位置。加密的卡片由 savePrivate 重新加密後存回去。 */
   function movePrivate(tab, fromId, toId) {
-    var list = (privateEntries(tab) || []).slice();
+    tab = livePrivate(tab);
+    if (!tab) return;
+    var list = privateEntries(tab).slice();
     var a = list.findIndex(function (x) { return x.id === fromId; });
     var b = list.findIndex(function (x) { return x.id === toId; });
     if (a < 0 || b < 0 || a === b) return;
@@ -2518,6 +2548,7 @@
       // 私人卡片與其中的每一筆，刪除前要先驗主密碼或復原金鑰
       confirmDeletePrivate: confirmDeletePrivate,
       privateEntries: privateEntries,
+      livePrivate: livePrivate,
       setPrivateEntries: setPrivateEntries,
       convertPrivate: convertPrivate,
       pickTabColor: pickTabColor,

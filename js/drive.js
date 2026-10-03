@@ -387,15 +387,21 @@
 
   /* ---------- 同步 ---------- */
 
+  /* 上傳途中又改了東西（261003a 修正，同事 10/03 回報「第二張 QR 要匯入兩次」）：
+     以前上傳完一律記成「本機版本＝現在的時間、沒有沒上傳的」，但途中改的那一筆
+     不在這次送出去的內容裡——下一輪同步看到兩邊時間不同、本機又「沒改過」，
+     就拿雲端舊版蓋掉，剛加的帳號消失。網路慢（剛登入時）最容易踩到。
+     現在記的是「送出去那一刻」的版本時間，途中有改就保留「還沒上傳」，下一輪照常上傳。 */
   function upload(keepalive) {
     var text = DB.exportJson();
+    var sentAt = DB.raw().updatedAt;
     var p = st.fileId
       ? backend.update(st.fileId, text, keepalive)
       : backend.create(text);
     return p.then(function (id) {
       if (id) st.fileId = id;
-      st.at = DB.raw().updatedAt;
-      st.dirty = false;
+      st.at = sentAt;
+      st.dirty = DB.raw().updatedAt !== sentAt;
       saveLocal();
     });
   }

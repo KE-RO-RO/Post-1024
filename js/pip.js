@@ -36,6 +36,22 @@
   var ui = {};           // 由 app.js 注入的東西
   var sizeTimer = null;
 
+  /* 捲動位置（261003a，使用者 10/03 回報「離開小視窗就跳回最上面」）。
+     小視窗每次重畫都是整個清掉重建，捲動位置要自己記、自己接回去。
+     每張卡片各記一份：切去別張再切回來，回到剛才看的地方。
+     scrollShort：上一次重畫時內容暫時比較短（例如雲端下載後 TOTP 先顯示「讀取中…」），
+     位置接不回去被瀏覽器壓到上面——這時不要把那個被壓過的位置當成新的記錄，
+     下一次內容完整時再接；使用者自己捲動或點了，就以他的為準。 */
+  var pipScroll = {};
+  var shownId = null;
+  var shownDoc = null;   // 上一次畫在哪一份文件：置頂／不置頂互換時是新視窗，不能把新視窗的 0 當成記錄
+  var scrollShort = false;
+
+  /* 中文輸入法組字中（拼音／注音打了還沒選字）不能重畫：
+     重建搜尋框會把組到一半的字弄壞。先記下來，選完字再畫（261003a） */
+  var composing = false;
+  var renderPending = false;
+
   /* 只有 Document PiP 有「浮在最上層」。這是規範強制的，
      requestWindow() 只有 width、height、disallowReturnToOpener、
      preferInitialWindowPlacement 四個選項，沒有開關可以關掉置頂。
@@ -309,9 +325,15 @@
       bar.appendChild(chip);
     });
     root.appendChild(bar);
-    // 正在看的那一張捲進畫面（名稱多的時候這一排會橫向捲動）
+    /* 正在看的那一張捲進畫面（名稱多的時候這一排會橫向捲動）。
+       只動這一排自己的橫向捲動：以前用 scrollIntoView，它會連整個小視窗一起往上捲，
+       放兩張以上時每次重畫（例如離開小視窗）就跳回最上面（261003a） */
     var on = bar.querySelector('.pip-tab.on');
-    if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    if (on) {
+      var a = on.getBoundingClientRect(), bb = bar.getBoundingClientRect();
+      if (a.left < bb.left) bar.scrollLeft += a.left - bb.left;
+      else if (a.right > bb.right) bar.scrollLeft += a.right - bb.right;
+    }
   }
 
   /**
@@ -332,15 +354,55 @@
     if (!ids.length) { close(); if (ui.onChange) ui.onChange(); return; }
     if (ids.indexOf(curId) < 0) curId = ids[0];
     var tab = DB.findTab(curId);
+    if (composing) { renderPending = true; return; }
+    renderPending = false;
 
     syncTheme();
-    var root = win.document.getElementById('pipRoot');
+    var d = win.document;
+    var root = d.getElementById('pipRoot');
     if (!root) return;
+
+    // 重建前：記下捲到哪裡、游標是不是在 TOTP 搜尋框（261003a）
+    var sc = d.body;    // 小視窗是 body 在捲（style.css 的 :root[data-pip] body）
+    if (shownId !== null && shownDoc === d && !scrollShort) pipScroll[shownId] = sc.scrollTop;
+    var ae = d.activeElement, keepSearch = null;
+    if (ae && ae.classList && ae.classList.contains('tp-search')) {
+      keepSearch = { s: ae.selectionStart, e: ae.selectionEnd };
+    }
+
     root.innerHTML = '';
     hotkeys = {};
     renderTabsBar(root);
     var card = Tabs.renderCard(tab, pipCtx);
     root.appendChild(card);
+
+    /* 重建後：接回捲動位置。以前沒有這一步，內容一變短（「讀取中…」、名稱那一排的捲動）
+       就停在最上面 */
+    var want = pipScroll[curId] || 0;
+    sc.scrollTop = want;
+    scrollShort = sc.scrollTop < want - 1;
+    shownId = curId;
+    shownDoc = d;
+    if (scrollShort) {
+      // 內容還在長（數字、字型剛到）：下一個畫面再接一次
+      var w0 = win, id0 = curId;
+      w0.requestAnimationFrame(function () {
+        if (win !== w0 || curId !== id0 || !scrollShort) return;
+        sc.scrollTop = want;
+        scrollShort = sc.scrollTop < want - 1;
+      });
+    }
+
+    /* 游標放回搜尋框（問題 3：小視窗搜尋時主視窗剛好重畫——剛登入時的解密、下載——
+       搜尋框被換成新的、游標掉了，接著按刪除鍵沒反應，畫面卡在搜尋結果）。
+       新的搜尋框已經帶著原本打的字，這裡只把游標與選取範圍接回去 */
+    if (keepSearch) {
+      var ns = root.querySelector('.tp-search');
+      if (ns) {
+        try { ns.focus({ preventScroll: true }); } catch (e) { ns.focus(); }
+        try { ns.setSelectionRange(keepSearch.s, keepSearch.e); } catch (e) { /* 舊瀏覽器不支援就算了 */ }
+      }
+    }
 
     /* 當場切換置頂／不置頂。做在小視窗自己的標題列上，而不是疊在
        主視窗那顆彈出鈕上——那顆按下去是「彈出」，再承載一種語意就是 11.1。
@@ -386,6 +448,7 @@
      卡片本身的鎖定狀態不動，回來點一下就展開，不必重打密碼。 */
   function onBlur() {
     clearAsk();
+    composing = false;     // 視窗失焦時組字一定結束了；保險起見，避免卡在「先不重畫」
     if (!ids.length) return;
     // TOTP 卡不在失焦時遮：使用者工作時一直在別的視窗輸入驗證碼（v4.26 改成按眼睛手動遮）。
     // 連結收藏（v4.35）展開的那幾筆收回去，放在小視窗裡的每一張都收
@@ -442,6 +505,16 @@
         var t = e.target;
         if (askId !== null && !(t && t.closest && t.closest('.pip-tab-x.ask'))) clearAsk();
       }, true);
+      // 使用者自己捲動、點了：以他現在的位置為準，不再等著接回舊位置（261003a）
+      ['wheel', 'pointerdown', 'keydown', 'touchstart'].forEach(function (ev) {
+        w.document.addEventListener(ev, function () { scrollShort = false; }, { capture: true, passive: true });
+      });
+      // 輸入法組字中先不重畫，選完字再補畫（261003a）
+      w.document.addEventListener('compositionstart', function () { composing = true; }, true);
+      w.document.addEventListener('compositionend', function () {
+        composing = false;
+        if (renderPending) setTimeout(function () { if (!composing) render(); }, 0);
+      }, true);
     }
   }
 
@@ -451,6 +524,8 @@
     ids = [];
     curId = null;
     hotkeys = {};
+    pipScroll = {}; shownId = null; shownDoc = null; scrollShort = false;
+    composing = false; renderPending = false;
     if (ui.onChange) ui.onChange();
   }
 

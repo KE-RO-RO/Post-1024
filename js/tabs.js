@@ -1556,12 +1556,15 @@
       head.appendChild(iconBtn('✕', '刪除這一筆', function () {
         ctx.confirmDeletePrivate(tab, '刪除項目',
           '將刪除「' + (item.name || url0 || '未命名') + '」。', function () {
-            var list = (ctx.privateEntries(tab) || []).filter(function (x) {
+            // 確認框開著時雲端可能換過整份資料：換成現在那一張再刪（261003a）
+            var t = ctx.livePrivate ? ctx.livePrivate(tab) : tab;
+            if (!t) return;
+            var list = (ctx.privateEntries(t) || []).filter(function (x) {
               return x.id !== item.id;
             });
             delete pvOpen[okey];
-            ctx.setPrivateEntries(tab, list);
-            ctx.savePrivate(tab);
+            ctx.setPrivateEntries(t, list);
+            ctx.savePrivate(t);
           });
       }, 'danger-btn'));
 
@@ -2353,6 +2356,17 @@
       live.codeEl.classList.remove('warn');
       return;
     }
+    /* 這一組已經算過就當場填上（261003a）：以前一律等 Promise，重建卡片的當下數字是空的、
+       每一列比較矮，小視窗接回捲動位置時會被壓到上面去 */
+    var cached = tpCache[e.id + ':' + counter];
+    if (cached) {
+      live.code = cached;
+      live.codeEl.textContent = tpFmt(cached);
+      live.codeEl.classList.toggle('warn', soon);
+      return;
+    }
+    // 還沒算好：先放佔位字，列高不變
+    if (!live.codeEl.textContent) live.codeEl.textContent = '··· ···';
     tpGet(e, counter).then(function (c) {
       live.code = c;
       live.codeEl.textContent = tpFmt(c);
@@ -2564,9 +2578,12 @@
           ctx.confirmDeletePrivate(tab, '刪除帳號',
             '將刪除「' + (entry.name || '未命名') + '」這個帳號的驗證碼。' +
             '<br>手機上的 Authenticator 不受影響，但這裡的金鑰會一起消失。', function () {
-              var list = (ctx.privateEntries(tab) || []).filter(function (x) { return x.id !== entry.id; });
-              ctx.setPrivateEntries(tab, list);
-              ctx.savePrivate(tab);
+              // 確認框開著時雲端可能換過整份資料：換成現在那一張再刪（261003a）
+              var t = ctx.livePrivate ? ctx.livePrivate(tab) : tab;
+              if (!t) return;
+              var list = (ctx.privateEntries(t) || []).filter(function (x) { return x.id !== entry.id; });
+              ctx.setPrivateEntries(t, list);
+              ctx.savePrivate(t);
             });
         }, 'danger-btn'));
       }
