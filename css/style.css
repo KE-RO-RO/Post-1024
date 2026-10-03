@@ -2636,3 +2636,38 @@ textarea,
   font-size: 12px;
   color: var(--text-faint);
 }
+
+/* ============================================================
+   匯出卡片給別人（v4.40）：照分類列出卡片勾選
+   這幾個是 label，要用 #modalBody 開頭蓋過上面「#modalBody label { display: block }」
+   ============================================================ */
+.share-group { margin: 0 0 12px; }
+#modalBody .share-cat {
+  display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px;
+  padding: 4px 0; font-weight: 600; color: var(--text);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+#modalBody .share-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 13px;
+  padding: 5px 0 5px 18px; color: var(--text); cursor: pointer;
+}
+#modalBody .share-row.off { color: var(--text-faint); cursor: default; }
+.share-type {
+  flex: 0 0 auto;
+  padding: 0 6px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--text-dim);
+  font-size: 11px; line-height: 18px;
+}
+.share-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-why { flex-basis: 100%; padding-left: 24px; color: var(--text-faint); font-size: 12px; line-height: 1.5; }
+#modalBody .share-strip {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 0; font-size: 13px;
+  margin-top: 6px; padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  color: var(--text-dim); cursor: pointer;
+}
+#modalBody .share-strip[hidden] { display: none; }
+.share-list { margin: 8px 0 10px; padding-left: 20px; }
+.share-list li { margin: 2px 0; color: var(--text); }
+.share-list small { margin-left: 4px; color: var(--text-faint); }
