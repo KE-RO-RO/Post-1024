@@ -2550,6 +2550,7 @@
       confirmDeletePrivate: confirmDeletePrivate,
       privateEntries: privateEntries,
       livePrivate: livePrivate,
+      shareTabs: openShareExport,
       setPrivateEntries: setPrivateEntries,
       convertPrivate: convertPrivate,
       pickTabColor: pickTabColor,
@@ -3848,6 +3849,189 @@
     });
   }
 
+  /* ============================================================
+     匯出卡片給別人／匯入時分辨檔案種類（v4.40，使用者 10/03）
+     ------------------------------------------------------------
+     匯出：照分類列出卡片勾選；加密的連結收藏、TOTP 卡停用並寫原因。
+     選到的不加密連結收藏有帳號、密碼或備忘時，多一個「不含」的勾選，預設勾著。
+     匯入：同一顆「匯入資料」。分享檔加成新卡片（放進同名分類、沒有就新建），
+     備份檔照舊整個取代。
+     ============================================================ */
+  function shareFileName(ids) {
+    var one = ids.length === 1 ? DB.findTab(ids[0]) : null;
+    var name = one ? String(one.title || '未命名').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 30)
+                   : ids.length + '張';
+    return '便籤分享_' + name + '_' + stamp() + '.json';
+  }
+
+  function openShareExport(preselect) {
+    var picked = {};
+    (preselect || []).forEach(function (id) { picked[id] = true; });
+    var wrap = document.createElement('div');
+    wrap.className = 'share-pick';
+
+    var lead = document.createElement('div');
+    lead.className = 'field-hint';
+    lead.style.margin = '0 0 10px';
+    lead.innerHTML = '勾選要給別人的卡片，存成一個檔案。對方用「☰ → 匯入資料」選這個檔，' +
+      '會加成新卡片，<b>不會蓋掉他原本的東西</b>。';
+    wrap.appendChild(lead);
+
+    var boxes = [];   // { tab, cb }
+    DB.categories().forEach(function (c) {
+      var tabs = DB.tabsOf(c.id);
+      if (!tabs.length) return;
+      var group = document.createElement('div');
+      group.className = 'share-group';
+      var head = document.createElement('label');
+      head.className = 'share-cat';
+      var all = document.createElement('input');
+      all.type = 'checkbox';
+      head.appendChild(all);
+      head.appendChild(document.createTextNode(' ' + c.name));
+      group.appendChild(head);
+      var mine = [];
+      tabs.forEach(function (t) {
+        var why = DB.shareBlockReason(t);
+        var row = document.createElement('label');
+        row.className = 'share-row' + (why ? ' off' : '');
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.disabled = !!why;
+        cb.checked = !why && !!picked[t.id];
+        cb.dataset.tabId = t.id;
+        row.appendChild(cb);
+        var badge = document.createElement('span');
+        badge.className = 'share-type';
+        badge.textContent = Tabs.TYPE_LABEL[t.type] || t.type;
+        row.appendChild(badge);
+        var nm = document.createElement('span');
+        nm.className = 'share-name';
+        nm.textContent = t.title || '未命名';
+        row.appendChild(nm);
+        if (why) {
+          var w = document.createElement('small');
+          w.className = 'share-why';
+          w.textContent = why;
+          row.appendChild(w);
+        }
+        group.appendChild(row);
+        if (!why) { mine.push(cb); boxes.push({ tab: t, cb: cb }); }
+        cb.addEventListener('change', sync);
+      });
+      if (!mine.length) all.disabled = true;
+      all.addEventListener('change', function () {
+        mine.forEach(function (cb) { cb.checked = all.checked; });
+        sync();
+      });
+      group._all = all; group._mine = mine;
+      wrap.appendChild(group);
+    });
+
+    var strip = document.createElement('label');
+    strip.className = 'share-strip';
+    var stripCb = document.createElement('input');
+    stripCb.type = 'checkbox';
+    stripCb.checked = true;      // 使用者選的：預設拿掉（10/03）
+    strip.appendChild(stripCb);
+    strip.appendChild(document.createTextNode(' 連結收藏不含帳號、密碼、備忘（只給名稱與網址）'));
+    wrap.appendChild(strip);
+
+    function chosen() {
+      return boxes.filter(function (b) { return b.cb.checked; }).map(function (b) { return b.tab; });
+    }
+    function sync() {
+      var list = chosen();
+      strip.hidden = !list.some(DB.tabHasSecrets);
+      Array.prototype.forEach.call(wrap.querySelectorAll('.share-group'), function (g) {
+        if (!g._mine.length) return;
+        var n = g._mine.filter(function (cb) { return cb.checked; }).length;
+        g._all.checked = n === g._mine.length;
+        g._all.indeterminate = n > 0 && n < g._mine.length;
+      });
+      var btn = document.querySelector('#modalFooter .btn-primary');
+      if (btn) {
+        btn.textContent = '匯出（' + list.length + ' 張）';
+        btn.disabled = !list.length;
+      }
+    }
+
+    showModal({
+      title: '匯出卡片給別人',
+      body: wrap,
+      buttons: [
+        { text: '取消', onClick: closeModal },
+        { text: '匯出', cls: 'btn-primary', onClick: function () {
+          var ids = chosen().map(function (t) { return t.id; });
+          if (!ids.length) return;
+          var stripped = !strip.hidden && stripCb.checked;
+          var r = DB.exportCards(ids, { stripSecrets: stripped });
+          download(shareFileName(ids), r.text);
+          closeModal();
+          Clip.toast('已匯出 ' + r.count + ' 張卡片' + (stripped ? '（不含帳號、密碼、備忘）' : ''));
+        } }
+      ]
+    });
+    sync();
+  }
+
+  /** 選好檔案之後：看是分享檔還是備份檔，各問各的 */
+  function askImport(text) {
+    var parsed;
+    try { parsed = JSON.parse(text); } catch (err) {
+      Clip.toast('匯入失敗：這個檔案不是這個工具的資料檔', true);
+      return;
+    }
+    if (DB.isShareData(parsed)) { askImportShare(text); return; }
+    confirmModal('匯入資料',
+      '這是<b>完整的備份檔</b>，匯入會<strong>覆蓋目前所有內容</strong>。<br><br>' +
+      '建議先做一次「匯出資料」留底再繼續。',
+      '覆蓋', function () {
+        try {
+          DB.importJson(text);
+          state.currentCategoryId = null;
+          render();
+          Clip.toast('匯入完成');
+        } catch (err) {
+          Clip.toast('匯入失敗：' + err.message, true);
+        }
+      }, true);
+  }
+
+  function askImportShare(text) {
+    var pv;
+    try { pv = DB.previewShare(text); } catch (err) {
+      Clip.toast('匯入失敗：' + err.message, true);
+      return;
+    }
+    if (!pv.cards.length) {
+      Clip.toast('這個檔案裡沒有可以加入的卡片', true);
+      return;
+    }
+    var html = '要加入 <b>' + pv.cards.length + ' 張卡片</b>，<b>不會動到你原本的東西</b>：' +
+      '<ul class="share-list">' + pv.cards.map(function (c) {
+        return '<li>' + escapeText(c.title || '未命名') + '<small>（' +
+          escapeText(Tabs.TYPE_LABEL[c.type] || c.type) + '）→ ' + escapeText(c.category) + '</small></li>';
+      }).join('') + '</ul>' +
+      (pv.newCats.length ? '會新增分類：' + pv.newCats.map(escapeText).join('、') + '<br>' : '') +
+      (pv.skipped ? '另有 ' + pv.skipped + ' 張加密卡片或 TOTP 不會加入<br>' : '');
+    confirmModal('匯入卡片', html, '加入', function () {
+      try {
+        var r = DB.importCards(text);
+        // 切到第一張加進來的卡片所在的分類，馬上看得到
+        var first = DB.categories().filter(function (c) {
+          return c.name.trim() === String(pv.cards[0].category).trim();
+        })[0];
+        if (first) state.currentCategoryId = first.id;
+        render();
+        Clip.toast('已加入 ' + r.added + ' 張卡片' +
+          (r.clearedKeys ? '；' + r.clearedKeys + ' 個複製鍵跟原本的撞到，已清掉' : ''));
+      } catch (err) {
+        Clip.toast('匯入失敗：' + err.message, true);
+      }
+    });
+  }
+
   function handleMenu(act) {
     $('menuPanel').hidden = true;
 
@@ -3867,12 +4051,11 @@
       else doExport();
     }
 
-    if (act === 'import') {
-      confirmModal('匯入資料',
-        '匯入會<strong>覆蓋目前所有內容</strong>。<br><br>' +
-        '建議先做一次「匯出資料」留底再繼續。',
-        '選擇檔案', function () { $('importFile').click(); }, true);
-    }
+    if (act === 'shareExport') openShareExport(null);
+
+    /* v4.40：先選檔、再看是哪一種檔案才決定怎麼問。
+       卡片分享檔 → 加成新卡片，不覆蓋；完整備份檔 → 跟以前一樣警告會整個取代 */
+    if (act === 'import') $('importFile').click();
 
     if (act === 'trash') openTrash();
 
@@ -3967,6 +4150,9 @@
       '重新整理後如果沒有自動登入會跳提醒；重新登入之前改的東西都還在，登入後會補傳。' +
         '另一台在這段時間也改過的話，會問你要留哪一邊',
       '建議偶爾「匯出資料」留一份：雲端那份跟著你改，誤刪也會同步過去',
+      '<b>給別人卡片</b>：☰「匯出卡片給別人」（或卡片 ⋯「匯出這張給別人」）存成檔案，' +
+        '對方用「匯入資料」選那個檔，會<b>加成新卡片</b>（放進同名的分類，沒有就新建），不會蓋掉他原本的東西。' +
+        '加密的連結收藏與 TOTP 不能匯出；連結收藏預設不含帳號、密碼、備忘',
       '<b>最近刪除</b>：刪掉的卡片先放這裡，可以還原（留 ' + DB.TRASH_DAYS + ' 天、最多 ' + DB.TRASH_MAX + ' 張）',
       '<b>分頁暫存</b>：☰ 最下面的百分比，約 5MB，超過 80% 會提醒',
       '<b>真的滿了</b>：① 先匯出留底 ② 最近刪除全部清空 ③ 找出大東西（常見是整篇文章貼進便籤）' +
@@ -3996,6 +4182,8 @@
         '被擋住時按鈕只會開還沒開的，每按一次開下一個；允許之後再按一次就全部開完'],
       ['簡體字有幾個字長得不一樣？', '☰ →「外觀」→「介面字型」改成雅黑體，繁簡就一致了'],
       ['TOTP 數字跟手機不一樣？', '檢查電腦時鐘；登入雲端時如果偵測到時差，會在卡片上方提醒'],
+      ['匯入資料會不會蓋掉我的東西？', '看是哪種檔案：別人給的<b>卡片分享檔</b>只會加成新卡片；' +
+        '自己用「匯出資料」存的<b>完整備份檔</b>才會整個取代，取代前會先問'],
       ['主密碼忘了？', '在鎖著的卡片上點「忘記主密碼」，用復原金鑰重設'],
       ['小視窗點不出來／消失？', '置頂小視窗只能從主視窗開，關掉主視窗它也會一起關']
     ].forEach(function (q) {
@@ -4317,16 +4505,7 @@
       var file = e.target.files && e.target.files[0];
       if (!file) return;
       var reader = new FileReader();
-      reader.onload = function () {
-        try {
-          DB.importJson(String(reader.result));
-          state.currentCategoryId = null;
-          render();
-          Clip.toast('匯入完成');
-        } catch (err) {
-          Clip.toast('匯入失敗：' + err.message, true);
-        }
-      };
+      reader.onload = function () { askImport(String(reader.result)); };
       reader.readAsText(file, 'utf-8');
       e.target.value = '';
     });

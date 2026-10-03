@@ -473,6 +473,15 @@
       onClick: function () { ctx.askMoveTab(tab); }
     });
 
+    /* 匯出這張給別人（v4.40）：打開跟 ☰「匯出卡片給別人」同一個彈窗，這張已經勾好。
+       加密的卡片與 TOTP 不能匯出，照「不支援的項目」做法：選單裡停用、寫原因 */
+    if (ctx.shareTabs) {
+      var why = DB.shareBlockReason(tab);
+      items.push(why
+        ? { text: '匯出這張給別人', disabled: true, hint: why }
+        : { text: '匯出這張給別人', onClick: function () { ctx.shareTabs([tab.id]); } });
+    }
+
     if (tab.type === 'private') {
       items.push({
         text: '一次開多個分頁被擋下時怎麼辦',

@@ -2580,8 +2580,153 @@
     return JSON.stringify(copy, null, 2);
   }
 
+  /* ============================================================
+     匯出卡片給別人（v4.40，使用者 10/03）
+     ------------------------------------------------------------
+     檔案格式跟「匯出資料」同一種（同樣的 categories／tabs 結構，匯入時走同一套 migrate 驗證），
+     最外層多一個 share 記號。匯入看到記號就「加成新卡片」，不覆蓋對方原有的任何東西。
+     - 加密的連結收藏、TOTP 卡不能匯出：它們是用「你的」主密碼鎖的，對方打不開，
+       也跟他自己的主密碼對不上；TOTP 的金鑰給出去等於把驗證碼也給了
+     - 不帶：保管層（vault）、最近刪除、設定、釘選、收合
+     - 不加密的連結收藏可以拿掉帳號、密碼、備忘（使用者選的：預設拿掉，備忘一起）
+     ============================================================ */
+  var SHARE_MARK = 'sticky-notes-cards';
+
+  /** 這張卡片不能匯出的原因；可以匯出回空字串 */
+  function shareBlockReason(t) {
+    if (!t) return '找不到這張卡片';
+    if (t.type === 'totp') return 'TOTP 卡不能匯出：金鑰給出去，等於把驗證碼也給了對方';
+    if (t.type === 'private' && t.encrypted !== false) {
+      return '加密的卡片不能匯出：要你的主密碼才打得開，對方用不了';
+    }
+    return '';
+  }
+  function canShareTab(t) { return !shareBlockReason(t); }
+
+  /** 不加密的連結收藏裡有沒有帳號、密碼或備忘（匯出彈窗決定要不要出現「不含」那個勾選） */
+  function tabHasSecrets(t) {
+    return !!t && t.type === 'private' && t.encrypted === false &&
+      (t.entries || []).some(function (e) { return !!(e && (e.user || e.pass || e.note)); });
+  }
+
+  /**
+   * @param {string[]} ids 要匯出的卡片
+   * @param {Object} opt { stripSecrets: 拿掉連結收藏的帳號、密碼、備忘 }
+   * @returns {{ text: string, count: number }}
+   */
+  function exportCards(ids, opt) {
+    opt = opt || {};
+    var tabs = (ids || []).map(findTab).filter(canShareTab);
+    var catIds = [];
+    tabs.forEach(function (t) { if (catIds.indexOf(t.categoryId) < 0) catIds.push(t.categoryId); });
+    var now = nowIso();
+    var out = {
+      share: SHARE_MARK,
+      shareVersion: 1,
+      exportedAt: now,
+      updatedAt: now,
+      categories: catIds.map(function (id, i) {
+        var c = findCategory(id);
+        return { id: id, name: c ? c.name : '未命名', order: i };
+      }),
+      tabs: tabs.map(function (t, i) {
+        var c = JSON.parse(JSON.stringify(t));
+        c.order = i;
+        c.pinned = false;
+        c.collapsed = false;
+        delete c.vault;
+        delete c.enc;
+        if (c.type === 'private' && opt.stripSecrets) {
+          c.entries = (c.entries || []).map(function (e) {
+            var x = JSON.parse(JSON.stringify(e));
+            x.user = ''; x.pass = ''; x.note = '';
+            return x;
+          });
+        }
+        return c;
+      })
+    };
+    return { text: JSON.stringify(out, null, 2), count: out.tabs.length };
+  }
+
+  /** 是不是卡片分享檔。parsed 是 JSON.parse 的結果 */
+  function isShareData(parsed) {
+    return !!parsed && typeof parsed === 'object' && parsed.share === SHARE_MARK;
+  }
+
+  /** 匯入前給彈窗看的：裡面有哪些卡片、放到哪個分類、哪些是新分類 */
+  function previewShare(text) {
+    var parsed = JSON.parse(text);
+    if (!isShareData(parsed)) throw new Error('這不是卡片分享檔');
+    var next = migrate(parsed);
+    var names = {};
+    next.categories.forEach(function (c) { names[c.id] = c.name; });
+    var cards = [], skipped = 0, newCats = [];
+    next.tabs.forEach(function (t) {
+      if (!canShareTab(t)) { skipped++; return; }
+      var cat = names[t.categoryId] || '匯入的卡片';
+      var exists = data.categories.some(function (c) { return c.name.trim() === cat.trim(); });
+      if (!exists && newCats.indexOf(cat) < 0) newCats.push(cat);
+      cards.push({ title: t.title, type: t.type, category: cat });
+    });
+    return { cards: cards, skipped: skipped, newCats: newCats };
+  }
+
+  /**
+   * 把分享檔裡的卡片加成新卡片。不覆蓋、不刪除任何原有的東西。
+   * - 放進「同名的分類」，沒有就新建（使用者選的）
+   * - 卡片與裡面每一筆都換新的 id：同一個檔匯兩次也不會撞
+   * - 常用語的複製鍵跟那個分類原有的撞到，清掉匯入那張的（比照搬移卡片）
+   * - 加密卡片與 TOTP 就算被塞進檔案也不收（檔案可能被動過）
+   * @returns {{ added: number, newCats: string[], clearedKeys: number, skipped: number }}
+   */
+  function importCards(text) {
+    var parsed = JSON.parse(text);
+    if (!isShareData(parsed)) throw new Error('這不是卡片分享檔');
+    var next = migrate(parsed);
+    var names = {};
+    next.categories.forEach(function (c) { names[c.id] = c.name; });
+    var catMap = {};
+    var report = { added: 0, newCats: [], clearedKeys: 0, skipped: 0 };
+    next.tabs.forEach(function (t) {
+      if (!canShareTab(t)) { report.skipped++; return; }
+      var name = names[t.categoryId] || '匯入的卡片';
+      var local = catMap[t.categoryId];
+      if (!local) {
+        var hit = data.categories.filter(function (c) { return c.name.trim() === name.trim(); })[0];
+        if (!hit) {
+          hit = { id: uid(), name: name, shortLabel: firstChar(name),
+                  order: data.categories.length, color: null };
+          data.categories.push(hit);
+          report.newCats.push(name);
+        }
+        local = catMap[t.categoryId] = hit.id;
+      }
+      t.id = uid();
+      t.categoryId = local;
+      t.pinned = false;
+      t.collapsed = false;
+      t.order = tabsOf(local).length;
+      t.createdAt = t.updatedAt = nowIso();
+      ['items', 'rows', 'entries'].forEach(function (k) {
+        if (Array.isArray(t[k])) t[k].forEach(function (x) { if (x && typeof x === 'object') x.id = uid(); });
+      });
+      if (t.type === 'quickphrase') {
+        (t.rows || []).forEach(function (r) {
+          if (r.hotkey && findHotkeyConflict(local, r.hotkey, r.id)) { r.hotkey = ''; report.clearedKeys++; }
+        });
+      }
+      data.tabs.push(t);
+      report.added++;
+    });
+    if (report.added) touch();
+    return report;
+  }
+
   function importJson(text) {
     var parsed = JSON.parse(text);
+    // 分享檔只能「加進來」，絕對不能拿來整個取代（v4.40）
+    if (isShareData(parsed)) throw new Error('這是卡片分享檔，請用「匯入資料」加成新卡片');
     var next = migrate(parsed);
     if (!next.categories || !next.categories.length) {
       throw new Error('檔案裡沒有任何分類，可能不是這個工具的資料檔');
@@ -2697,6 +2842,12 @@
     findHotkeyConflict: findHotkeyConflict,
     exportJson: exportJson,
     importJson: importJson,
+    shareBlockReason: shareBlockReason,
+    tabHasSecrets: tabHasSecrets,
+    exportCards: exportCards,
+    isShareData: isShareData,
+    previewShare: previewShare,
+    importCards: importCards,
     PALETTE: PALETTE,
     paletteName: paletteName,
     TYPE_COLOR: TYPE_COLOR,
