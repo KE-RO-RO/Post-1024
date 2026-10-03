@@ -1608,7 +1608,10 @@ body.drawer-open #app { margin-right: 356px; }
   margin: 0;
   padding: 10px;
   overflow: auto;
-  background: var(--bg);
+  /* 底色要跟主視窗的內容區一樣：面板（--panel）疊在 --bg-deep 上（v4.40 修正）。
+     主視窗的卡片是 --panel-alt（半透明）→ 內容區 --panel（半透明）→ body 的 --bg-deep；
+     以前小視窗只鋪 --bg，卡片直接透出底色——自訂底色時（例如藍底）小視窗的卡片就偏藍偏灰 */
+  background: linear-gradient(var(--panel), var(--panel)), var(--bg-deep);
 }
 #pipRoot { min-height: 100%; }
 #pipRoot .card { width: auto; margin: 0; }
