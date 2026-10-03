@@ -2712,8 +2712,26 @@
     layoutGrid();
   }
 
+  /* 重畫時接回內容區的捲動位置（261003g，使用者 10/03 回報「收合點一次就跳到最上面」）。
+     每次修改（收合、展開、勾待辦…）都會把整片卡片清掉重畫；重畫中途有程式量尺寸（排版、
+     TOTP 清單的高度）時，內容區一瞬間是空的，瀏覽器就把捲動位置壓回 0，之後也不會自己回去。
+     只有「同一個畫面」重畫才接回去：換分類、搜尋字變了，照舊從最上面開始。 */
+  var contentView = null;
+  function restoreContentScroll(sc, top) {
+    if (!sc || !top) return;
+    sc.scrollTop = top;
+    // 內容還在長（例如加密卡片剛解開、數字還沒算好）接不回去時，下一個畫面再接一次
+    if (sc.scrollTop < top - 1) {
+      requestAnimationFrame(function () { if (sc.scrollTop < top - 1) sc.scrollTop = top; });
+    }
+  }
+
   function renderContent() {
     var grid = $('cardGrid');
+    var sc = $('content');
+    var view = state.search ? 's:' + state.search : 'c:' + state.currentCategoryId;
+    var keepTop = sc && view === contentView ? sc.scrollTop : 0;
+    contentView = view;
     grid.innerHTML = '';
     state.hotkeys = {};
     // 搜尋時把手要藏起來：畫面上是過濾後的結果，這時候拖曳算出來的順序是錯的
@@ -2839,6 +2857,7 @@
       hint.hidden = !!total;
       if (!total) hint.textContent = '沒有符合「' + state.search + '」的內容。';
       watchGrid();
+      restoreContentScroll(sc, keepTop);
       return;
     }
 
@@ -2851,6 +2870,7 @@
     hint.hidden = !!total;
     if (!total) hint.textContent = '這個分類還沒有卡片。點右上角「＋ 新增卡片」開始。';
     watchGrid();
+    restoreContentScroll(sc, keepTop);
   }
 
   /* ============================================================
