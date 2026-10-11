@@ -8,10 +8,12 @@
 
    1. 瀏覽器同時只允許存在一個 PiP 視窗，所以**置頂小視窗最多一個**，
       裡面可以放好幾張（v4.35 A1：上面一排卡片名稱切換，✕ 移出）。
-   2. **不置頂視窗可以同時開好幾個**（v4.43，使用者 10/11 選方案 B）：
-      每個不置頂視窗也能放好幾張；⋯ 選單可以「加進不置頂視窗」或
-      「開成新的獨立視窗」，小視窗名稱旁的 ⇱ 把那張拉出來自己一個視窗。
-      一張卡片同時只在一個視窗裡：開去別的視窗就從原本那個移過去。
+   2. 三種小視窗（v4.44，使用者 10/11：「整合成三個」）：
+      - 置頂小視窗：一個，放好幾張（上面一排分頁）
+      - 不置頂小視窗：一個，放好幾張（上面一排分頁）
+      - 獨立小視窗：一張卡片一個、可以開好幾個、沒有分頁列；一定是不置頂（置頂只准一個）
+      分頁名稱旁的 ⇱ 把那張拉出成獨立小視窗；獨立小視窗標題列的 ⇲ 把它加回置頂／不置頂小視窗。
+      一張卡片同時只在一個視窗裡：開去別的視窗就從原本那個搬過去。
    3. 只有 Chromium 系（Chrome、Edge）有 PiP。不支援時 ⋯ 選單的置頂那項停用並說明原因。
    4. 視窗位置由瀏覽器決定（不置頂視窗開第二個以後會往右下錯開）；大小記起來。
    5. 小視窗是**另一份文件**，有自己的 body、樣式表與焦點狀態。
@@ -36,8 +38,7 @@
   var ui = {};           // 由 app.js 注入的東西
   var boxes = [];        // 開著的小視窗（makeBox 的結果），置頂的最多一個
   var recent = null;     // 最近操作的那個視窗（舊介面 ids()／mode()／_window() 看它）
-  var lastWin = null;    // 「加進不置頂視窗」加去哪一個：最近操作過的不置頂視窗
-  var winSeq = 0;        // 不置頂視窗的名字要每個不同，同名的 window.open 會重複用同一個視窗
+  var winSeq = 0;        // 一般彈出視窗的名字要每個不同，同名的 window.open 會重複用同一個視窗
 
   /* 只有 Document PiP 有「浮在最上層」。這是規範強制的，
      requestWindow() 只有 width、height、disallowReturnToOpener、
@@ -65,15 +66,14 @@
     return live().filter(function (b) { return b.kind === 'pip'; })[0] || null;
   }
 
-  function winBoxes() {
-    return live().filter(function (b) { return b.kind === 'win'; });
+  /** 不置頂小視窗（可以放好幾張的那個），最多一個（v4.44） */
+  function winBox() {
+    return live().filter(function (b) { return b.kind === 'win'; })[0] || null;
   }
 
-  /** 「加進不置頂視窗」的目標：最近操作過的不置頂視窗，沒有就是最後開的那個 */
-  function winTarget() {
-    if (lastWin && lastWin.alive()) return lastWin;
-    var w = winBoxes();
-    return w.length ? w[w.length - 1] : null;
+  /** 一般彈出視窗（不置頂小視窗＋獨立小視窗），新開的要往右下錯開 */
+  function popupBoxes() {
+    return live().filter(function (b) { return b.kind !== 'pip'; });
   }
 
   /** 這張卡片在哪個視窗裡（一張只會在一個裡面） */
@@ -89,7 +89,6 @@
 
   function touchBox(b) {
     recent = b;
-    if (b.kind === 'win') lastWin = b;
   }
 
   function notify() { if (ui.onChange) ui.onChange(); }
@@ -105,7 +104,7 @@
     return !!b && b.cur() === tab.id;
   }
 
-  /** 帶卡片：那張在哪一種視窗裡（'pip'／'win'／null）。
+  /** 帶卡片：那張在哪一種視窗裡（'pip'／'win'／'solo'／null）。
       不帶：最近操作那個視窗是哪一種，沒開任何視窗是 null（舊介面，app.js 拿來判斷「有沒有開著」） */
   function modeOf(tab) {
     if (tab) { var b = boxOf(tab.id); return b ? b.kind : null; }
@@ -114,13 +113,6 @@
   }
 
   function hasPip() { return !!pipBox(); }
-  function hasWin() { return winBoxes().length > 0; }
-
-  /** 這張是不是自己一個人在一個不置頂視窗裡（這時「開成新的獨立視窗」沒有意義） */
-  function aloneInWin(tab) {
-    var b = tab && boxOf(tab.id);
-    return !!b && b.kind === 'win' && b.ids().length === 1;
-  }
 
   /** 把 id 加到清單最後（已經在裡面就不動），回傳新的清單 */
   function withTab(list, id) {
@@ -134,7 +126,8 @@
   /* ---------- 一個視窗（v4.43 起每個視窗各一份） ---------- */
 
   /**
-   * @param {string} kind 'pip' = 置頂（Document PiP）、'win' = 不置頂（一般彈出視窗）
+   * @param {string} kind 'pip' = 置頂小視窗（Document PiP）、'win' = 不置頂小視窗、
+   *        'solo' = 獨立小視窗（後兩種都是一般彈出視窗；solo 只放一張、沒有分頁列）
    */
   function makeBox(kind) {
     var B = { kind: kind };
@@ -388,12 +381,9 @@
       isPipped: isOpen,
       isPipActive: isActive,
       pipMode: modeOf,
-      hasPip: hasPip,
-      hasWin: hasWin,
-      aloneInWin: aloneInWin,
       togglePip: noop,
       togglePipWindow: noop,
-      openNewWindow: noop
+      togglePipSolo: noop
     };
 
     /* ---------- 開關與重繪 ---------- */
@@ -511,12 +501,12 @@
         };
         chip.appendChild(nm);
 
-        /* ⇱ 拉出來自己一個視窗（v4.43，使用者 10/11）：變成新的不置頂視窗，這裡的移走。
+        /* ⇱ 拉出來變成獨立小視窗（v4.43，使用者 10/11），這裡的移走。
            一下就拉，不用按兩下：卡片沒有消失，只是換到另一個視窗，按錯了再加回來就好 */
         var out = d.createElement('button');
         out.className = 'pip-tab-out';
         out.textContent = '⇱';
-        out.title = '拉出來，自己開一個不置頂視窗';
+        out.title = '拉出來，變成獨立小視窗';
         out.addEventListener('click', function (e) {
           e.stopPropagation();
           clearAsk();
@@ -648,10 +638,74 @@
         head.appendChild(b);
       }
 
+      /* 獨立小視窗的 ⇲（v4.44，使用者看過 A／B 示意圖選 A）：一顆鈕，點了跳兩個選項
+         「加入置頂小視窗」「加入不置頂小視窗」。方向跟分頁上的 ⇱ 相反 */
+      closeJoinPop();
+      if (head && kind === 'solo') {
+        var jb = document.createElement('button');
+        jb.className = 'icon-btn pip-ok pip-join-btn';
+        jb.textContent = '⇲';
+        jb.title = '加入置頂或不置頂小視窗（變成那裡的一個分頁）';
+        jb.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (win.document.querySelector('.pip-join-pop')) { closeJoinPop(); return; }
+          openJoinPop(jb, tab.id);
+        });
+        head.appendChild(jb);
+      }
+
       win.document.title = tab.title || '未命名';
     }
 
+    /* ⇲ 跳出來的兩個選項。放在 body 底下（不在 #pipRoot 裡）：
+       #pipRoot 每次重畫都整個清掉，而且裡面的按鈕是「預設隱藏」（4.12） */
+    function closeJoinPop() {
+      if (!win || win.closed) return;
+      var old = win.document.querySelector('.pip-join-pop');
+      if (old) old.parentNode.removeChild(old);
+      var on = win.document.querySelector('.pip-join-btn.on');
+      if (on) on.classList.remove('on');
+    }
+
+    function openJoinPop(btn, id) {
+      var d = win.document;
+      var pop = d.createElement('div');
+      pop.className = 'pip-join-pop';
+      var r = btn.getBoundingClientRect();
+      pop.style.top = Math.round(r.bottom + 4) + 'px';
+      pop.style.right = Math.max(6, Math.round(d.documentElement.clientWidth - r.right)) + 'px';
+
+      /* 置頂小視窗沒開時不能從這裡開：Chrome 的置頂視窗跟著開它的視窗走，
+         這個獨立小視窗搬完就關，置頂的會跟著消失（11.57）。所以只能加進已經開著的 */
+      var canPip = supported() && !!pipBox();
+      var a = d.createElement('button');
+      a.textContent = '加入置頂小視窗';
+      a.disabled = !canPip;
+      a.addEventListener('click', function (e) {
+        e.stopPropagation();
+        closeJoinPop();
+        joinFromSolo(B, id, 'pip');
+      });
+      pop.appendChild(a);
+      if (!canPip) {
+        var hint = d.createElement('small');
+        hint.textContent = supported() ? '先從主視窗開置頂小視窗' : '這個瀏覽器不支援置頂小視窗';
+        pop.appendChild(hint);
+      }
+      var w2 = d.createElement('button');
+      w2.textContent = '加入不置頂小視窗';
+      w2.addEventListener('click', function (e) {
+        e.stopPropagation();
+        closeJoinPop();
+        joinFromSolo(B, id, 'win');
+      });
+      pop.appendChild(w2);
+      d.body.appendChild(pop);
+      btn.classList.add('on');
+    }
+
     function onKeyDown(e) {
+      if (e.key === 'Escape') closeJoinPop();
       if (e.ctrlKey || e.metaKey) return;
       var t = e.target;
       var typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
@@ -729,6 +783,8 @@
         w.document.addEventListener('pointerdown', function (e) {
           var t = e.target;
           if (askId !== null && !(t && t.closest && t.closest('.pip-tab-x.ask'))) clearAsk();
+        // ⇲ 的選項：點選項或 ⇲ 本身以外的地方就收起來（v4.44）
+        if (!(t && t.closest && t.closest('.pip-join-pop, .pip-join-btn'))) closeJoinPop();
         }, true);
         // 使用者自己捲動、點了：以他現在的位置為準，不再等著接回舊位置（261003a）
         ['wheel', 'pointerdown', 'keydown', 'touchstart'].forEach(function (ev) {
@@ -849,19 +905,19 @@
   }
 
   /**
-   * 不置頂：一般的彈出視窗，每個用不同的名字（v4.43 可以同時開好幾個）。
+   * 一般的彈出視窗（不置頂小視窗、獨立小視窗），每個用不同的名字。
    * 會被彈出視窗攔截擋掉（跟連結一次開多個分頁是同一件事），
    * 擋掉時 window.open 回傳 null——這裡沒有用 noopener，回傳值才判斷得準（11.7）。
    * @param from 點擊發生在哪個小視窗上（圖釘、⇱）：使用者動作是它的，先用它的
    *        window.open 開（11.52）；開不起來再退回主視窗。
    * @return 新的視窗（makeBox），被擋就是 null
    */
-  function openWinBox(list, id, from, onOk) {
+  function openWinBox(kind, list, id, from, onOk) {
     var size = DB.pipSize();
     var feat = 'popup=yes,width=' + size.w + ',height=' + size.h;
-    /* 已經有不置頂視窗時，新的往右下錯開，不要整個疊在上一個上面。
+    /* 已經有一般彈出視窗時，新的往右下錯開，不要整個疊在上一個上面。
        第一個照舊讓瀏覽器決定位置 */
-    var prev = winBoxes();
+    var prev = popupBoxes();
     var ref = prev.length ? prev[prev.length - 1].win() : null;
     if (ref) {
       try {
@@ -880,13 +936,13 @@
 
     if (!w) {
       // 從小視窗按的，提示要出現在那個小視窗上，主視窗多半被蓋住（11.26）
-      Clip.toast('不置頂視窗被瀏覽器擋下了，允許彈出式視窗之後再試一次', true,
+      Clip.toast('小視窗被瀏覽器擋下了，允許彈出式視窗之後再試一次', true,
         from && !from.closed ? from.document : undefined);
       return null;
     }
     try { w.opener = null; } catch (e) { /* 跨來源時會被拒，忽略 */ }
 
-    var b = makeBox('win');
+    var b = makeBox(kind === 'solo' ? 'solo' : 'win');
     boxes.push(b);
     touchBox(b);
     /* 新的接好之後才動舊的（11.72）：圖釘那條路的 onOk 是關掉置頂視窗，
@@ -909,65 +965,89 @@
     notify();
   }
 
-  /** 置頂：不在置頂小視窗 → 加進去（沒開就開一個）；在裡面 → 移出或切過去 */
+  /** 把卡片搬進一個收納視窗（置頂或不置頂小視窗）：原本在別的視窗就從那裡拿掉 */
+  function moveInto(target, id, from) {
+    if (from && from !== target) from.take(id);
+    touchBox(target);
+    target.add(id);
+    notify();
+  }
+
+  /** 置頂小視窗：不在裡面 → 加入（沒開就開）；在裡面 → 移出或切過去 */
   function toggle(tab) {
     var from = boxOf(tab.id);
     if (from && from.kind === 'pip') { pressSame(from, tab); return; }
     var p = pipBox();
-    if (p) {
-      if (from) from.take(tab.id);
-      touchBox(p);
-      p.add(tab.id);
-      notify();
-      return;
-    }
+    if (p) { moveInto(p, tab.id, from); return; }
     openPipBox([], tab.id, function () { if (from) from.take(tab.id); });
   }
 
-  /** 不置頂：不在不置頂視窗 → 加進最近用的那個（沒有就開一個）；在裡面 → 移出或切過去 */
+  /** 不置頂小視窗（v4.44 起只有一個）：不在裡面 → 加入（沒開就開）；在裡面 → 移出或切過去 */
   function toggleWindowed(tab) {
     var from = boxOf(tab.id);
     if (from && from.kind === 'win') { pressSame(from, tab); return; }
-    var t = winTarget();
-    if (t) {
-      if (from) from.take(tab.id);
-      touchBox(t);
-      t.add(tab.id);
-      notify();
-      return;
-    }
-    openWinBox([], tab.id, null, function () { if (from) from.take(tab.id); });
+    var w = winBox();
+    if (w) { moveInto(w, tab.id, from); return; }
+    openWinBox('win', [], tab.id, null, function () { if (from) from.take(tab.id); });
   }
 
-  /** 開成新的獨立視窗（不置頂），原本在哪個視窗就從那裡移走（v4.43） */
-  function openNew(tab) {
+  /** 獨立小視窗（v4.44）：還沒獨立開 → 開一個只放這張的（原本在分頁裡就移走）；已經獨立開了 → 關掉 */
+  function toggleSolo(tab) {
     var from = boxOf(tab.id);
-    openWinBox([], tab.id, null, function () { if (from) from.take(tab.id); });
+    if (from && from.kind === 'solo') { from.close(); notify(); return; }
+    openWinBox('solo', [], tab.id, null, function () { if (from) from.take(tab.id); });
   }
 
-  /** 小視窗名稱旁的 ⇱：拉出來自己一個不置頂視窗（v4.43）。先開新的，開得起來才從這裡拿掉 */
+  /** 分頁名稱旁的 ⇱：拉出成獨立小視窗。點擊在小視窗上，用它的 window.open（11.52）；
+      先開新的、接好才從這裡拿掉（11.72） */
   function popOut(b, id) {
     if (!DB.findTab(id)) return;
-    openWinBox([], id, b.win(), function () { b.take(id); });
+    openWinBox('solo', [], id, b.win(), function () { b.take(id); });
   }
 
-  /** 置頂視窗裡的圖釘：整個換成不置頂視窗，裡面的卡片一起帶過去、顯示的那張不變。
-      開成一個新的不置頂視窗（不併進已經開著的那幾個）。先開新的再關舊的，開不起來時置頂視窗還在 */
+  /** 獨立小視窗的 ⇲（v4.44）：加入置頂或不置頂小視窗。
+      置頂只能加進已經開著的（選單那邊已經擋了，這裡再擋一次）；
+      不置頂沒開就由這個獨立小視窗開（一般彈出視窗不會跟著開它的視窗一起關） */
+  function joinFromSolo(b, id, want) {
+    if (!DB.findTab(id)) return;
+    if (want === 'pip') {
+      var p = pipBox();
+      if (!p) return;
+      moveInto(p, id, b);
+      return;
+    }
+    var w = winBox();
+    if (w) { moveInto(w, id, b); return; }
+    openWinBox('win', [], id, b.win(), function () { b.take(id); });
+  }
+
+  /** 置頂小視窗的圖釘：整個換成不置頂。v4.44（使用者選的）：不置頂小視窗已經開著就**併進去**
+      （加在後面），沒開就開一個；顯示的那張不變。先接好新的再關舊的（11.72） */
   function switchMode(b) {
     if (b.kind !== 'pip' || !b.alive()) return;
     var cur = b.cur();
     if (!DB.findTab(cur)) return;
     var list = b.ids();
-    openWinBox(list, cur, b.win(), function () { b.close(); });
+    var w = winBox();
+    if (w) {
+      list.forEach(function (id) { if (id !== cur) w.add(id); });
+      w.add(cur);
+      touchBox(w);
+      b.close();
+      notify();
+      return;
+    }
+    openWinBox('win', list, cur, b.win(), function () { b.close(); });
   }
 
   /** 舊介面（測試與相容用）：wantMode 'win' 等同「不置頂」那項、其他等同「置頂」那項，
       但已經在那一種視窗裡時只切過去、不移出 */
   function open(tab, wantMode) {
-    var want = wantMode === 'win' ? 'win' : 'pip';
+    var want = wantMode === 'win' ? 'win' : (wantMode === 'solo' ? 'solo' : 'pip');
     if (want === 'pip' && !supported()) return;
     var b = boxOf(tab.id);
     if (b && b.kind === want) { touchBox(b); b.show(tab.id); notify(); return; }
+    if (wantMode === 'solo') { toggleSolo(tab); return; }
     if (want === 'win') toggleWindowed(tab);
     else toggle(tab);
   }
@@ -977,7 +1057,6 @@
     live().slice().forEach(function (b) { b.close(); });
     boxes = [];
     recent = null;
-    lastWin = null;
   }
 
   function renderAll(opt) {
@@ -987,7 +1066,7 @@
   /* 一般彈出視窗不會跟著開啟它的分頁一起消失（PiP 會）。
      主視窗關掉或重新整理時把它們全部收掉，不然會變成沒有人在更新的死畫面。 */
   window.addEventListener('pagehide', function () {
-    winBoxes().forEach(function (b) { b.close(); });
+    popupBoxes().forEach(function (b) { b.close(); });
   });
 
   /* 刻意不自己訂閱 DB.onChange：主視窗的 render() 會在套好主題與自訂配色
@@ -1001,13 +1080,11 @@
     isOpen: isOpen,
     isActive: isActive,
     hasPip: hasPip,
-    hasWin: hasWin,
-    aloneInWin: aloneInWin,
     open: open,
     close: closeAll,
     toggle: toggle,
     toggleWindowed: toggleWindowed,
-    openNew: openNew,
+    toggleSolo: toggleSolo,
     render: renderAll,
     setUI: setUI,
     // 測試與相容用：最近操作那個視窗的卡片清單、window

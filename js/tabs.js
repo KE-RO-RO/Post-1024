@@ -361,7 +361,7 @@
       var popped = ctx.isPipped(tab);
       var pm0 = popped && ctx.pipMode ? ctx.pipMode(tab) : null;
       head.appendChild(svgIconBtn(MORE_SVG,
-        popped ? ('更多（這張在' + (pm0 === 'win' ? '不置頂視窗' : '置頂小視窗') + '裡）') : '更多',
+        popped ? ('更多（這張在' + (pm0 === 'win' ? '不置頂小視窗' : (pm0 === 'solo' ? '獨立小視窗' : '置頂小視窗')) + '裡）') : '更多',
         function () {
           ctx.openCardMenu(tab, cardMenuItems(tab, ctx));
         }, 'more-btn' + (popped ? ' pip-on' : '')));
@@ -409,49 +409,45 @@
   function cardMenuItems(tab, ctx) {
     var items = [];
 
-    /* ---- 彈出（v4.43：全部收進 ⋯；置頂、不置頂、新的獨立視窗三項排在一起） ---- */
+    /* ---- 小視窗三項（v4.44，使用者 10/11：「整合成三個」，排在一起） ----
+       置頂小視窗、不置頂小視窗：各一個、可以放好幾張（分頁）；獨立小視窗：一張一個。
+       字跟著狀態變：不在裡面是「加入」、正在顯示是「移出」、在裡面沒顯示是「切到這張」 */
     var where = ctx.isPipped(tab) ? (ctx.pipMode ? ctx.pipMode(tab) : 'pip') : null;
     var active = ctx.isPipActive ? ctx.isPipActive(tab) : true;
+    function boxText(kind, name) {
+      if (where !== kind) return '加入' + name;
+      return active ? '從' + name + '移出' : '在' + name + '切到這張';
+    }
 
     if (!ctx.pipSupported()) {
       items.push({
         key: 'pip',
-        text: '彈出成置頂小視窗',
+        text: '加入置頂小視窗',
         disabled: true,
         hint: '這個瀏覽器不支援置頂小視窗（目前只有 Chrome、Edge 這類 Chromium 瀏覽器有）。' +
-              '「不置頂」的版本任何瀏覽器都能開'
+              '不置頂小視窗、獨立小視窗任何瀏覽器都能開'
       });
     } else {
       items.push({
         key: 'pip',
-        text: where === 'pip'
-          ? (active ? '從置頂小視窗移出' : '在置頂小視窗切到這張')
-          : ((ctx.hasPip && ctx.hasPip()) ? '加進置頂小視窗' : '彈出成置頂小視窗'),
+        text: boxText('pip', '置頂小視窗'),
         onClick: function () { ctx.togglePip(tab); }
       });
     }
 
-    /* 不置頂的版本走一般彈出視窗。置頂是 Document PiP 規範強制的，
-       沒有開關可以關掉，所以「不置頂」只能是另一種視窗（4.12）。
-       v4.43：不置頂視窗可以同時開好幾個。「加進」加到最近用的那一個 */
+    /* 不置頂走一般彈出視窗。置頂是 Document PiP 規範強制的，
+       沒有開關可以關掉，所以「不置頂」只能是另一種視窗（4.12） */
     items.push({
       key: 'win',
-      text: where === 'win'
-        ? (active ? '從不置頂視窗移出' : '在不置頂視窗切到這張')
-        : ((ctx.hasWin && ctx.hasWin()) ? '加進不置頂視窗' : '彈出成不置頂視窗'),
+      text: boxText('win', '不置頂小視窗'),
       onClick: function () { ctx.togglePipWindow(tab); }
     });
 
-    /* 開成新的獨立視窗（v4.43）：已經有小視窗時才出現——沒有任何小視窗時，
-       上面那項「彈出成不置頂視窗」就是獨立開。自己一個人在不置頂視窗裡時也不出現 */
-    if (ctx.openNewWindow && ((ctx.hasPip && ctx.hasPip()) || (ctx.hasWin && ctx.hasWin())) &&
-        !(ctx.aloneInWin && ctx.aloneInWin(tab))) {
-      items.push({
-        key: 'newwin',
-        text: '開成新的獨立視窗（不置頂）',
-        onClick: function () { ctx.openNewWindow(tab); }
-      });
-    }
+    items.push({
+      key: 'solo',
+      text: where === 'solo' ? '關閉獨立小視窗' : '開成獨立小視窗',
+      onClick: function () { ctx.togglePipSolo(tab); }
+    });
 
     /* 精簡標題列（私人加密、TOTP）收進來的顏色與釘選 */
     if (isSlimHead(tab)) {

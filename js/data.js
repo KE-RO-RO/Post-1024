@@ -478,11 +478,14 @@
      「刪除這張卡片」不在清單裡，永遠在最下面（使用者選的，避免拖到上面誤按）。
      驗證跟 typeOrder 一樣嚴：不認得的丟掉、重複的丟掉、程式認得但清單裡沒有的補在最後——
      之後加新項目時，舊的資料檔不會讓它消失。沒排過就是 null，用出廠順序。 */
-  var MENU_KEYS = ['pip', 'win', 'newwin', 'color', 'pin', 'noteAll', 'format',
+  var MENU_KEYS = ['pip', 'win', 'solo', 'color', 'pin', 'noteAll', 'format',
                    'popupHelp', 'encrypt', 'move', 'share'];
 
   function normalizeMenuOrder(v) {
     if (!Array.isArray(v)) return null;
+    /* v4.43 的「開成新的獨立視窗」（newwin）在 v4.44 換成「獨立小視窗」（solo），
+       使用者排過的位置照舊（10/11 他已經排過） */
+    v = v.map(function (k) { return k === 'newwin' ? 'solo' : k; });
     var out = [];
     v.forEach(function (k) {
       if (typeof k === 'string' && MENU_KEYS.indexOf(k) >= 0 && out.indexOf(k) < 0) out.push(k);
