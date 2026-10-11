@@ -2493,34 +2493,114 @@
   /**
    * 卡片的 ⋯ 選單。項目由 tabs.js 的 cardMenuItems() 決定（那裡才知道
    * 每種卡片有哪些動作），這裡只負責畫，跟分類的 ⋯ 長得一樣。
+   *
+   * v4.43（使用者 10/11）：每一項左邊有 ⠿，按住拖曳可以調整順序，存在 settings.menuOrder
+   * （跟著同步走，全部卡片共用一份）。拖曳只認 ⠿，點文字照常執行——同「選擇卡片類型」
+   * 那個彈窗的做法（4.17、11.1）。刪除固定在最下面、沒有 ⠿。
    */
   function openCardMenu(tab, items) {
     var wrap = document.createElement('div');
+    wrap.className = 'menu-list';
+    var dragKey = null;
 
-    items.forEach(function (it) {
-      var b = document.createElement('button');
-      b.className = 'type-opt' + (it.danger ? ' danger-opt' : '');
-      b.style.width = '100%';
-      b.style.marginBottom = it.hint ? '2px' : '6px';
-      b.textContent = it.text;
-      if (it.disabled) {
-        b.disabled = true;
-      } else {
-        b.addEventListener('click', function () {
-          closeModal();
-          it.onClick();
+    function fill() {
+      wrap.innerHTML = '';
+      items.forEach(function (it) {
+        var cell = document.createElement('div');
+        cell.className = 'menu-cell';
+        if (it.key) cell.dataset.key = it.key;
+
+        var b = document.createElement('button');
+        b.className = 'type-opt' + (it.danger ? ' danger-opt' : '');
+        b.textContent = it.text;
+        if (it.disabled) {
+          b.disabled = true;
+        } else {
+          b.addEventListener('click', function () {
+            closeModal();
+            it.onClick();
+          });
+        }
+        cell.appendChild(b);
+
+        var sortable = it.key && it.key !== 'delete';
+        if (sortable) {
+          cell.classList.add('sortable');
+          var grip = document.createElement('span');
+          grip.className = 'type-grip';
+          grip.textContent = '⠿';
+          grip.title = '按住拖曳可調整順序（所有卡片共用、會同步）';
+          grip.addEventListener('mousedown', function (e) {
+            e.stopPropagation();
+            cell.draggable = true;
+          });
+          // 按下去沒拖就放開：把可拖關回去，不然下一次點項目可能變成拖曳
+          grip.addEventListener('mouseup', function () { cell.draggable = false; });
+          grip.addEventListener('click', function (e) { e.stopPropagation(); });
+          cell.appendChild(grip);
+
+          cell.addEventListener('dragstart', function (e) {
+            dragKey = it.key;
+            cell.classList.add('dragging');
+            try { e.dataTransfer.setData('text/plain', it.key); } catch (err) { /* 忽略 */ }
+            e.dataTransfer.effectAllowed = 'move';
+            e.stopPropagation();
+          });
+          cell.addEventListener('dragend', function (e) {
+            dragKey = null;
+            cell.draggable = false;
+            cell.classList.remove('dragging');
+            clearTypeDropMarks(wrap);
+            e.stopPropagation();
+          });
+          cell.addEventListener('dragover', function (e) {
+            if (!dragKey || dragKey === it.key) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'move';
+            cell.classList.add('row-drop-target');
+          });
+          cell.addEventListener('dragleave', function () {
+            cell.classList.remove('row-drop-target');
+          });
+          cell.addEventListener('drop', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var from = dragKey;
+            dragKey = null;
+            clearTypeDropMarks(wrap);
+            if (!from || from === it.key) return;
+            if (DB.moveMenuItem(from, it.key)) {
+              items = Tabs.sortMenuItems(items);
+              fill();
+            }
+          });
+        }
+
+        if (it.hint) {
+          var hint = document.createElement('div');
+          hint.className = 'field-hint menu-hint';
+          hint.textContent = it.hint;
+          cell.appendChild(hint);
+        }
+        wrap.appendChild(cell);
+      });
+
+      // 排過才出現；按了回出廠順序，選單當場重排
+      if (DB.menuOrderCustom()) {
+        var reset = document.createElement('button');
+        reset.className = 'link-btn menu-reset';
+        reset.textContent = '恢復預設順序';
+        reset.title = '⋯ 選單回到出廠的順序（所有卡片一起）';
+        reset.addEventListener('click', function () {
+          DB.resetMenuOrder();
+          items = Tabs.sortMenuItems(items);
+          fill();
         });
+        wrap.appendChild(reset);
       }
-      wrap.appendChild(b);
-
-      if (it.hint) {
-        var hint = document.createElement('div');
-        hint.className = 'field-hint';
-        hint.style.margin = '0 0 10px';
-        hint.textContent = it.hint;
-        wrap.appendChild(hint);
-      }
-    });
+    }
+    fill();
 
     showModal({
       title: '卡片：' + (tab.title || '未命名'),
@@ -2803,8 +2883,12 @@
       isPipped: PiP.isOpen,
       isPipActive: PiP.isActive,
       pipMode: PiP.mode,
+      hasPip: PiP.hasPip,
+      hasWin: PiP.hasWin,
+      aloneInWin: PiP.aloneInWin,
       togglePip: PiP.toggle,
       togglePipWindow: PiP.toggleWindowed,
+      openNewWindow: PiP.openNew,
       togglePin: function (tab) {
         var err = DB.togglePin(tab.id);
         if (err) Clip.toast(err, true);
@@ -4375,8 +4459,8 @@
       '<b>建分類</b>：左側欄分類旁的 ＋，例如「工作」「生活」',
       '<b>加卡片</b>：右上角「＋ 新增卡片」，挑一種卡片',
       '<b>開始用</b>：點常用語的一列就複製，到要用的地方按 Ctrl + V',
-      '<b>要一直看著的卡片</b>：卡片標題列的彈出鈕（加密的連結收藏、TOTP 卡在 ⋯ 裡）→ 變成浮在最上層的小視窗；' +
-        '再按別張的彈出鈕會加進同一個小視窗，上面一排名稱切換、按住名稱左右拖可以換順序'
+      '<b>要一直看著的卡片</b>：卡片 ⋯ →「彈出成置頂小視窗」→ 變成浮在最上層的小視窗；' +
+        '別張的 ⋯ 選「加進置頂小視窗」會放進同一個，上面一排名稱切換、按住名稱左右拖可以換順序'
     ], true);
 
     sec('卡片說明');
@@ -4417,8 +4501,12 @@
       '顏色：標題列的小圓點（加密的連結收藏、TOTP 卡在 ⋯ 裡）；☰ →「外觀」換主題、上色方式與介面字型',
       '顯示大小：頂部「顯示大小」調整整頁縮放',
       '多行內容：Enter 換行，Ctrl + Enter 存檔',
-      '小視窗：置頂小視窗只有 Chrome、Edge 支援；⋯ 裡的「不置頂視窗」任何瀏覽器都能開；' +
-        '一個小視窗可以放好幾張卡片，名稱旁的 ✕ <b>按兩下</b>把那張移出（第一下會先問「移出？」）'
+      '小視窗：都從卡片 ⋯ 開。置頂小視窗只有 Chrome、Edge 支援、同時只能一個；' +
+        '不置頂視窗任何瀏覽器都能開、可以同時開好幾個。⋯ 可以「加進」已經開著的，或「開成新的獨立視窗」；' +
+        '一個小視窗可以放好幾張卡片，名稱旁的 ⇱ 把那張拉出來自己一個視窗，✕ <b>按兩下</b>把那張移出（第一下會先問「移出？」）。' +
+        '卡片在小視窗裡時，它的 ⋯ 會亮起來',
+      '⋯ 選單：每一項左邊的 ⠿ 按住拖曳可以換順序（所有卡片共用、會同步），排過之後最下面有「恢復預設順序」；' +
+        '刪除固定在最下面'
     ]);
 
     sec('常見問題');
@@ -4433,7 +4521,9 @@
       ['匯入資料會不會蓋掉我的東西？', '看是哪種檔案：別人給的<b>卡片分享檔</b>只會加成新卡片；' +
         '自己用「匯出資料」存的<b>完整備份檔</b>才會整個取代，取代前會先問'],
       ['主密碼忘了？', '在鎖著的卡片上點「忘記主密碼」，用復原金鑰重設'],
-      ['小視窗點不出來／消失？', '置頂小視窗只能從主視窗開，關掉主視窗它也會一起關']
+      ['小視窗點不出來／消失？', '置頂小視窗只能從主視窗開，關掉主視窗它也會一起關'],
+      ['為什麼置頂小視窗只能開一個？', '這是 Chrome 的規定，一個網頁同時只能有一個置頂小視窗。' +
+        '想並排好幾個，用 ⋯ 的「開成新的獨立視窗（不置頂）」，或在小視窗名稱旁按 ⇱ 拉出來']
     ].forEach(function (q) {
       h.push('<div class="help-qa"><b>' + q[0] + '</b><span>' + q[1] + '</span></div>');
     });

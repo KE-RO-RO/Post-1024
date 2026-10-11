@@ -471,6 +471,56 @@
     return true;
   }
 
+  /* 卡片 ⋯ 選單的順序（v4.43，使用者 10/11：「同類的排在一起」＋「可以自由排序並存檔」）。
+     代號與出廠順序寫在這裡；使用者拖出來的順序存在 settings.menuOrder，
+     跟著匯出匯入與雲端同步走（同 typeOrder）。全部卡片共用一份：
+     每張卡片只有自己用得到的那幾項，照這份清單的相對位置排。
+     「刪除這張卡片」不在清單裡，永遠在最下面（使用者選的，避免拖到上面誤按）。
+     驗證跟 typeOrder 一樣嚴：不認得的丟掉、重複的丟掉、程式認得但清單裡沒有的補在最後——
+     之後加新項目時，舊的資料檔不會讓它消失。沒排過就是 null，用出廠順序。 */
+  var MENU_KEYS = ['pip', 'win', 'newwin', 'color', 'pin', 'noteAll', 'format',
+                   'popupHelp', 'encrypt', 'move', 'share'];
+
+  function normalizeMenuOrder(v) {
+    if (!Array.isArray(v)) return null;
+    var out = [];
+    v.forEach(function (k) {
+      if (typeof k === 'string' && MENU_KEYS.indexOf(k) >= 0 && out.indexOf(k) < 0) out.push(k);
+    });
+    if (!out.length) return null;
+    MENU_KEYS.forEach(function (k) { if (out.indexOf(k) < 0) out.push(k); });
+    return out;
+  }
+
+  function menuOrder() {
+    return normalizeMenuOrder(data.settings && data.settings.menuOrder) || MENU_KEYS.slice();
+  }
+
+  /** 有沒有排過（決定選單底下要不要出現「恢復預設順序」） */
+  function menuOrderCustom() {
+    var v = normalizeMenuOrder(data.settings && data.settings.menuOrder);
+    return !!v && v.join() !== MENU_KEYS.join();
+  }
+
+  /** 把 from 移到 to 的位置（同 moveType：往下拖插在目標後面、往上拖插在前面） */
+  function moveMenuItem(from, to) {
+    if (from === to) return false;
+    var list = menuOrder();
+    var a = list.indexOf(from), b = list.indexOf(to);
+    if (a < 0 || b < 0) return false;
+    list.splice(a, 1);
+    list.splice(b, 0, from);
+    data.settings.menuOrder = list;
+    touch();
+    return true;
+  }
+
+  function resetMenuOrder() {
+    if (data.settings.menuOrder == null) return;
+    data.settings.menuOrder = null;
+    touch();
+  }
+
   /* 介面字型（v4.35）。微軟正黑體沒有「录、码」這類簡體字，Windows 會從別套字型借字，
      同一行繁簡混排時字型不一致（使用者截圖）。三個選項都只用電腦內建的字型，
      不載入網路字型（零對外請求）。這個值會被寫進 <html data-font>，所以只收名單裡的 */
@@ -502,6 +552,7 @@
       uiZoom: normalizeZoom(s.uiZoom),
       uiFont: normalizeUiFont(s.uiFont),
       typeOrder: normalizeTypeOrder(s.typeOrder),
+      menuOrder: normalizeMenuOrder(s.menuOrder),
       theme: {
         // 預設亮色＋細線版。寫成「不是 dark 就當 light」，所以只有資料裡
         // 明確存著 dark 的才是暗色；既有使用者存過的設定不會被覆蓋。
@@ -2938,6 +2989,11 @@
     noteFormText: noteFormText,
     CARD_TYPES: CARD_TYPES,
     typeOrder: typeOrder,
+    menuOrder: menuOrder,
+    menuOrderCustom: menuOrderCustom,
+    moveMenuItem: moveMenuItem,
+    resetMenuOrder: resetMenuOrder,
+    MENU_KEYS: MENU_KEYS.slice(),
     moveType: moveType,
     normalizeLinkEntry: normalizeLinkEntry,
     normalizeLinkEntries: normalizeLinkEntries,

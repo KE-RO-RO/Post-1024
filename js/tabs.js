@@ -314,19 +314,8 @@
     var slim = isSlimHead(tab);
 
     if (!RO && !slim) {
-      // 彈出置頂小視窗。這個瀏覽器不支援時不常駐一顆停用的按鈕，
-      // 改成在 ⋯ 選單裡標示原因（見 cardMenuItems）
-      if (ctx.pipSupported()) {
-        var pipMode = ctx.pipMode ? ctx.pipMode() : null;
-        var pipActive = ctx.isPipActive ? ctx.isPipActive(tab) : ctx.isPipped(tab);
-        head.appendChild(svgIconBtn(PIP_SVG,
-          !ctx.isPipped(tab) ? '加進置頂小視窗'
-            : (pipMode === 'win' ? '這張卡片在不置頂小視窗裡，點一下改成置頂'
-               : (pipActive ? '這張卡片正顯示在置頂小視窗，點一下移出'
-                            : '這張卡片在置頂小視窗裡，點一下切到這張')),
-          function () { ctx.togglePip(tab); },
-          ctx.isPipped(tab) ? 'pip-on' : ''));
-      }
+      /* 彈出鈕 v4.43 起不在標題列了（使用者 10/11：彈出的功能全收進 ⋯ 選單）。
+         卡片在小視窗裡時改由 ⋯ 亮成強調色表示，見下面的 more-btn */
 
       // 選色點：滑鼠移到標題列才浮現，點下去開色票
       var dot = document.createElement('button');
@@ -367,9 +356,15 @@
     }
 
     if (!RO) {
-      head.appendChild(svgIconBtn(MORE_SVG, '更多', function () {
-        ctx.openCardMenu(tab, cardMenuItems(tab, ctx));
-      }, 'more-btn'));
+      /* 卡片在小視窗裡：⋯ 亮成強調色（v4.43）。以前是標題列的彈出鈕亮起來，
+         那顆鈕收進 ⋯ 之後，靠這個一眼看出哪幾張彈出去了 */
+      var popped = ctx.isPipped(tab);
+      var pm0 = popped && ctx.pipMode ? ctx.pipMode(tab) : null;
+      head.appendChild(svgIconBtn(MORE_SVG,
+        popped ? ('更多（這張在' + (pm0 === 'win' ? '不置頂視窗' : '置頂小視窗') + '裡）') : '更多',
+        function () {
+          ctx.openCardMenu(tab, cardMenuItems(tab, ctx));
+        }, 'more-btn' + (popped ? ' pip-on' : '')));
     }
 
     card.appendChild(head);
@@ -394,21 +389,74 @@
     return tab.type === 'totp' || (tab.type === 'private' && tab.encrypted === true);
   }
 
+  /* ⋯ 選單的每一項都有一個代號（key），順序存在 settings.menuOrder（v4.43，使用者 10/11：
+     「同類的排在一起」＋「可以自由排序並存檔」）。出廠順序與代號清單在 data.js 的 MENU_KEYS。
+     刪除不在排序裡，永遠在最下面（使用者選的，避免拖到上面誤按）。
+     每張卡片只有自己用得到的那幾項；順序是全部卡片共用一份，所以排在誰前面是相對的 */
+  function sortMenuItems(items) {
+    var order = DB.menuOrder();
+    var del = items.filter(function (it) { return it.key === 'delete'; });
+    var rest = items.filter(function (it) { return it.key !== 'delete'; });
+    rest.sort(function (x, y) {
+      var a = order.indexOf(x.key), b = order.indexOf(y.key);
+      if (a < 0) a = 999;
+      if (b < 0) b = 999;
+      return a - b;
+    });
+    return rest.concat(del);
+  }
+
   function cardMenuItems(tab, ctx) {
     var items = [];
 
-    /* 精簡標題列收進來的四項排最上面，順序照原本標題列由左到右 */
-    if (isSlimHead(tab)) {
-      if (ctx.pipSupported()) {
-        var pm = ctx.pipMode ? ctx.pipMode() : null;
-        var pa = ctx.isPipActive ? ctx.isPipActive(tab) : true;
-        items.push({
-          text: !ctx.isPipped(tab) ? '加進置頂小視窗'
-            : (pm === 'win' ? '改成置頂小視窗' : (pa ? '從置頂小視窗移出' : '在置頂小視窗切到這張')),
-          onClick: function () { ctx.togglePip(tab); }
-        });
-      }
+    /* ---- 彈出（v4.43：全部收進 ⋯；置頂、不置頂、新的獨立視窗三項排在一起） ---- */
+    var where = ctx.isPipped(tab) ? (ctx.pipMode ? ctx.pipMode(tab) : 'pip') : null;
+    var active = ctx.isPipActive ? ctx.isPipActive(tab) : true;
+
+    if (!ctx.pipSupported()) {
       items.push({
+        key: 'pip',
+        text: '彈出成置頂小視窗',
+        disabled: true,
+        hint: '這個瀏覽器不支援置頂小視窗（目前只有 Chrome、Edge 這類 Chromium 瀏覽器有）。' +
+              '「不置頂」的版本任何瀏覽器都能開'
+      });
+    } else {
+      items.push({
+        key: 'pip',
+        text: where === 'pip'
+          ? (active ? '從置頂小視窗移出' : '在置頂小視窗切到這張')
+          : ((ctx.hasPip && ctx.hasPip()) ? '加進置頂小視窗' : '彈出成置頂小視窗'),
+        onClick: function () { ctx.togglePip(tab); }
+      });
+    }
+
+    /* 不置頂的版本走一般彈出視窗。置頂是 Document PiP 規範強制的，
+       沒有開關可以關掉，所以「不置頂」只能是另一種視窗（4.12）。
+       v4.43：不置頂視窗可以同時開好幾個。「加進」加到最近用的那一個 */
+    items.push({
+      key: 'win',
+      text: where === 'win'
+        ? (active ? '從不置頂視窗移出' : '在不置頂視窗切到這張')
+        : ((ctx.hasWin && ctx.hasWin()) ? '加進不置頂視窗' : '彈出成不置頂視窗'),
+      onClick: function () { ctx.togglePipWindow(tab); }
+    });
+
+    /* 開成新的獨立視窗（v4.43）：已經有小視窗時才出現——沒有任何小視窗時，
+       上面那項「彈出成不置頂視窗」就是獨立開。自己一個人在不置頂視窗裡時也不出現 */
+    if (ctx.openNewWindow && ((ctx.hasPip && ctx.hasPip()) || (ctx.hasWin && ctx.hasWin())) &&
+        !(ctx.aloneInWin && ctx.aloneInWin(tab))) {
+      items.push({
+        key: 'newwin',
+        text: '開成新的獨立視窗（不置頂）',
+        onClick: function () { ctx.openNewWindow(tab); }
+      });
+    }
+
+    /* 精簡標題列（私人加密、TOTP）收進來的顏色與釘選 */
+    if (isSlimHead(tab)) {
+      items.push({
+        key: 'color',
         text: '卡片顏色',
         onClick: function () {
           /* 等這次點擊冒泡完再開：document 上的「點外面就收色票」會把剛開的關掉。
@@ -420,38 +468,17 @@
         }
       });
       items.push({
+        key: 'pin',
         text: tab.pinned ? '取消釘選' : '釘選（固定在最上面）',
         onClick: function () { ctx.togglePin(tab); }
       });
       // 收合鈕在標題列上（9/27），選單裡不重複
     }
 
-    if (!ctx.pipSupported()) {
-      items.push({
-        text: '彈出成置頂小視窗',
-        disabled: true,
-        hint: '這個瀏覽器不支援置頂小視窗（目前只有 Chrome、Edge 這類 Chromium 瀏覽器有）。' +
-              '下面那個「不置頂」的版本任何瀏覽器都能開'
-      });
-    }
-
-    /* 不置頂的版本走一般彈出視窗。置頂是 Document PiP 規範強制的，
-       沒有開關可以關掉，所以「不置頂」只能是另一種視窗。
-       常駐的彈出鈕維持「置頂」不變，這裡是另一個入口（對照 11.1）。 */
-    /* v4.35：小視窗可以放好幾張（A1，上面一排名稱切換），按下去是「加進去」不是換掉 */
-    var pmw = ctx.pipMode ? ctx.pipMode() : null;
-    items.push({
-      text: ctx.isPipped(tab)
-        ? (pmw === 'win'
-            ? ((ctx.isPipActive ? ctx.isPipActive(tab) : true) ? '從不置頂視窗移出' : '在不置頂視窗切到這張')
-            : '改成不置頂視窗')
-        : (pmw === 'win' ? '加進不置頂視窗' : '彈出成不置頂視窗'),
-      onClick: function () { ctx.togglePipWindow(tab); }
-    });
-
     if (tab.type === 'note' && (tab.items || []).length > 1) {
       var anyOpen = tab.items.some(function (i) { return i.open !== false; });
       items.push({
+        key: 'noteAll',
         text: anyOpen ? '全部收合' : '全部展開',
         onClick: function () {
           tab.items.forEach(function (i) { i.open = !anyOpen; });
@@ -463,12 +490,27 @@
 
     if (tab.type === 'form') {
       items.push({
+        key: 'format',
         text: '輸出格式',
         onClick: function () { ctx.editFormTemplate(tab); }
       });
     }
 
+    if (tab.type === 'private') {
+      items.push({
+        key: 'popupHelp',
+        text: '一次開多個分頁被擋下時怎麼辦',
+        onClick: function () { ctx.showPopupHelp(); }
+      });
+      items.push({
+        key: 'encrypt',
+        text: tab.encrypted ? '取消加密' : '加上密碼保護',
+        onClick: function () { ctx.convertPrivate(tab); }
+      });
+    }
+
     items.push({
+      key: 'move',
       text: '移到其他分類',
       onClick: function () { ctx.askMoveTab(tab); }
     });
@@ -478,22 +520,12 @@
     if (ctx.shareTabs) {
       var why = DB.shareBlockReason(tab);
       items.push(why
-        ? { text: '匯出這張給別人', disabled: true, hint: why }
-        : { text: '匯出這張給別人', onClick: function () { ctx.shareTabs([tab.id]); } });
-    }
-
-    if (tab.type === 'private') {
-      items.push({
-        text: '一次開多個分頁被擋下時怎麼辦',
-        onClick: function () { ctx.showPopupHelp(); }
-      });
-      items.push({
-        text: tab.encrypted ? '取消加密' : '加上密碼保護',
-        onClick: function () { ctx.convertPrivate(tab); }
-      });
+        ? { key: 'share', text: '匯出這張給別人', disabled: true, hint: why }
+        : { key: 'share', text: '匯出這張給別人', onClick: function () { ctx.shareTabs([tab.id]); } });
     }
 
     items.push({
+      key: 'delete',
       text: '刪除這張卡片',
       danger: true,
       onClick: function () {
@@ -509,7 +541,7 @@
       }
     });
 
-    return items;
+    return sortMenuItems(items);
   }
 
   /**
@@ -1368,12 +1400,6 @@
     '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" ' +
     'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
     '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
-
-  var PIP_SVG =
-    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
-    'stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">' +
-    '<path d="M20 11V5.5A1.5 1.5 0 0 0 18.5 4h-13A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H11"/>' +
-    '<rect x="13" y="13" width="8" height="7" rx="1.2"/></svg>';
 
   function svgIconBtn(svg, title, onClick, extraClass) {
     var b = document.createElement('button');
@@ -2557,13 +2583,20 @@
     return tpLive.length > 0;
   }
 
-  /** 有列在小視窗（別的 window）裡就用那個視窗，否則用主視窗 */
+  /** 有列在小視窗（別的 window）裡就用那個視窗，否則用主視窗。
+      v4.43 起可以同時開好幾個小視窗：有置頂的優先（它一直在畫面上、不會被壓慢），
+      不置頂的可能被其他視窗蓋住 */
   function tpHostWin() {
+    var pipW = null;
+    try { pipW = window.documentPictureInPicture && window.documentPictureInPicture.window; } catch (e) { pipW = null; }
+    var other = null;
     for (var i = 0; i < tpLive.length; i++) {
       var v = tpLive[i].row.ownerDocument && tpLive[i].row.ownerDocument.defaultView;
-      if (v && v !== window && !v.closed) return v;
+      if (!v || v === window || v.closed) continue;
+      if (v === pipW) return v;
+      if (!other) other = v;
     }
-    return window;
+    return other || window;
   }
 
   function tpStopTimer() {
@@ -2862,6 +2895,8 @@
     // 置頂小視窗失去焦點時用：把展開的私人項目收回去（不解除卡片的鎖定狀態）
     collapsePrivate: forgetOpen,
     lazyCellsFromClipboard: lazyCellsFromClipboard,
-    fitNoteEditor: fitNoteEditor
+    fitNoteEditor: fitNoteEditor,
+    // ⋯ 選單拖完順序後重排用（v4.43）
+    sortMenuItems: sortMenuItems
   };
 })();
