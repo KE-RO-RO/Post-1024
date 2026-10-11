@@ -883,6 +883,18 @@ textarea.inline-edit, input.inline-edit {
 /* 插入位置：左緣一條線，同其他清單的 row-drop-target */
 .type-cell.row-drop-target .type-opt { box-shadow: inset 3px 0 0 var(--accent); }
 
+/* 卡片 ⋯ 選單（v4.43）：每一項左邊 ⠿ 可以拖曳排序，同上面的類型磁磚。
+   ⠿ 平常就淡淡看得到（選單是一條一條的，不像磁磚一滑就看到），滑過去才全亮。
+   刪除沒有 ⠿，文字也往右縮一樣多，整欄對齊 */
+.menu-cell { position: relative; display: grid; margin-bottom: 6px; }
+.menu-cell .type-opt { width: 100%; padding-left: 26px; }
+.menu-cell .type-grip { top: 14px; opacity: .6; }
+.menu-cell:hover .type-grip { opacity: 1; }
+.menu-cell.dragging { opacity: 0.4; }
+.menu-cell.row-drop-target .type-opt { box-shadow: inset 3px 0 0 var(--accent); }
+.menu-hint { margin: 2px 0 4px; }
+.menu-reset { display: block; margin: 2px auto 0; }
+
 /* ---------- ☰ 選單 ---------- */
 #menuPanel {
   position: fixed;
@@ -1677,7 +1689,9 @@ body.drawer-open #app { margin-right: 356px; }
 
 /* 卡片標題列：⋯ 與彈出鈕 */
 .more-btn, .card-head .icon-btn.pip-on { opacity: 1; }
+/* 卡片在小視窗裡：⋯ 亮成強調色（v4.43，彈出鈕收進 ⋯ 之後靠它看出哪幾張彈出去了） */
 .card-head .pip-on { color: var(--accent); }
+.card-head .more-btn.pip-on { background: var(--accent-soft); border-radius: 6px; }
 .danger-opt { color: var(--danger); }
 .danger-opt:hover { border-color: var(--danger); background: var(--danger-soft); }
 
@@ -2568,6 +2582,22 @@ textarea,
   cursor: pointer;
 }
 .pip-tab-x:hover { color: var(--danger-text); background: var(--danger-fill); }
+/* ⇱ 拉出來自己一個視窗（v4.43）：跟 ✕ 一樣小，平常淡、滑過去轉強調色 */
+.pip-tab-out {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin-right: 1px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 14px;
+  cursor: pointer;
+}
+.pip-tab-out:hover { color: var(--accent); background: var(--accent-soft); }
 /* 按了一下：變成「移出？」，再按一次才移出 */
 .pip-tab-x.ask {
   width: auto;
