@@ -2598,6 +2598,38 @@ textarea,
   cursor: pointer;
 }
 .pip-tab-out:hover { color: var(--accent); background: var(--accent-soft); }
+
+/* 獨立小視窗的 ⇲（v4.44）：點了在下面跳兩個選項「加入置頂小視窗／加入不置頂小視窗」。
+   選項放在 body 底下，不在 #pipRoot 裡（那裡重畫會整個清掉、按鈕預設隱藏） */
+.pip-join-btn { font-size: 13px; }
+.pip-join-btn.on { color: var(--accent); background: var(--accent-soft); border-radius: 6px; }
+.pip-join-pop {
+  position: fixed;
+  z-index: 50;
+  min-width: 170px;
+  padding: 6px;
+  /* --panel 是半透明的，單獨鋪會透出後面的字（同 11.69）：墊在 --bg-deep 上變成不透明 */
+  background: linear-gradient(var(--panel), var(--panel)), var(--bg-deep);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+.pip-join-pop button {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.pip-join-pop button:hover:not([disabled]) { background: var(--accent-soft); }
+.pip-join-pop button[disabled] { color: var(--text-faint); cursor: not-allowed; }
+.pip-join-pop small { display: block; padding: 0 10px 4px; color: var(--text-faint); font-size: 11px; }
 /* 按了一下：變成「移出？」，再按一次才移出 */
 .pip-tab-x.ask {
   width: auto;
