@@ -182,7 +182,12 @@
         link.rel = 'stylesheet';
         var main = document.querySelector('link[rel="stylesheet"]');
         link.href = main ? main.href : 'css/style.css';
+        /* 261018a：第一次畫的時候樣式表還沒載好，便籤編輯框是用瀏覽器預設的字級、行高量的，
+           量出來比實際內容矮一截（下面幾行被藏在框裡），打字時才突然重量、整頁跳動。
+           樣式表、字型到了再量一次 */
+        link.addEventListener('load', function () { refitEditors(); });
         d.head.appendChild(link);
+        try { if (d.fonts && d.fonts.ready) d.fonts.ready.then(function () { refitEditors(); }); } catch (e) { /* 忽略 */ }
       }
 
       // 自訂配色：內容會變，每次都同步
@@ -195,6 +200,13 @@
         d.head.appendChild(dstCustom);
       }
       dstCustom.textContent = srcCustom ? srcCustom.textContent : '';
+    }
+
+    /** 便籤編輯框重新量高度（樣式表載好、字型到了、視窗拉寬拉窄換行變了）。
+        fitNoteEditor 自己會把捲動位置接回去，這裡不用重畫整個小視窗 */
+    function refitEditors() {
+      if (!win || win.closed) return;
+      Array.prototype.forEach.call(win.document.querySelectorAll('.nt-pip-edit'), Tabs.fitNoteEditor);
     }
 
     /* ---------- 小視窗裡的密碼輸入 ---------- */
@@ -777,14 +789,16 @@
         // 被點到、切到的視窗就是「最近操作」的那個：「加進不置頂視窗」加到這裡（v4.43）
         w.addEventListener('focus', function () { if (win === w) touchBox(B); });
         w.addEventListener('resize', rememberSize);
+        // 視窗拉寬拉窄，便籤每一行換行的位置變了，高度要重量（261018a）
+        w.addEventListener('resize', function () { if (win === w) refitEditors(); });
         w.addEventListener('blur', onBlur);
         w.document.addEventListener('keydown', onKeyDown);
         // 點到「移出？」以外的地方就收回（261002b）
         w.document.addEventListener('pointerdown', function (e) {
           var t = e.target;
           if (askId !== null && !(t && t.closest && t.closest('.pip-tab-x.ask'))) clearAsk();
-        // ⇲ 的選項：點選項或 ⇲ 本身以外的地方就收起來（v4.44）
-        if (!(t && t.closest && t.closest('.pip-join-pop, .pip-join-btn'))) closeJoinPop();
+          // ⇲ 的選項：點選項或 ⇲ 本身以外的地方就收起來（v4.44）
+          if (!(t && t.closest && t.closest('.pip-join-pop, .pip-join-btn'))) closeJoinPop();
         }, true);
         // 使用者自己捲動、點了：以他現在的位置為準，不再等著接回舊位置（261003a）
         ['wheel', 'pointerdown', 'keydown', 'touchstart'].forEach(function (ev) {

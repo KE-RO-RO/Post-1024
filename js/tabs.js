@@ -128,19 +128,40 @@
       var input = document.createElement(opt.multiline ? 'textarea' : 'input');
       input.className = 'inline-edit';
       input.value = getValue() || '';
+      var saved = null, autoH = null, shownH = 0;
       if (opt.multiline) {
         input.rows = Math.min(10, Math.max(2, input.value.split('\n').length + 1));
         /* 使用者手動拉過大小就照他拉的來。瀏覽器會把拖曳結果寫進
            inline style 的 height，所以只要在收工時把它存起來、
            下次開啟時套回去，框就不會每次縮回預設高度。 */
-        var saved = opt.getHeight && opt.getHeight();
+        saved = opt.getHeight && opt.getHeight();
         if (saved) input.style.height = saved;
+        /* 261018a（使用者 10/18：「新增內容畫面就跳到置頂」）：沒拉過高度的長便籤，
+           顯示時是整段攤開，一點進來卻變成最多 10 行的框——整張卡片瞬間縮短，
+           內容區跟著被壓回上面，剛剛點的地方就不見了。進來前先量顯示時的高度，
+           編輯框至少跟它一樣高，卡片的高度就不會在點下去的那一刻變掉 */
+        else if (opt.keepHeight) {
+          var cs = getComputedStyle(el);
+          shownH = el.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+        }
       }
 
       el.textContent = '';
       el.classList.remove('placeholder');
       el.appendChild(input);
-      input.focus();
+      if (shownH) {
+        // 框自己的內距與框線另外加上去，文字區才跟顯示時一樣高（不然最後一行藏在框裡）
+        var ics = getComputedStyle(input);
+        shownH += ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth']
+          .reduce(function (s, k) { return s + (parseFloat(ics[k]) || 0); }, 0);
+      }
+      if (shownH > input.offsetHeight) {
+        input.style.height = Math.ceil(shownH) + 'px';
+        autoH = input.style.height;    // 這是程式定的，不是使用者拉的，收工時不記成他的高度
+      }
+      /* 不讓 focus 自己捲動畫面：使用者是點在看得到的地方，框本來就在眼前；
+         長便籤的框比畫面高時，focus 會把畫面捲去對齊框的頂端（又是「跳到上面」） */
+      try { input.focus({ preventScroll: true }); } catch (e) { input.focus(); }
       /* 單行欄位進來多半是整個換掉，全選省一次 Ctrl+A。
          多行不行——便籤是接著往下打的，全選狀態下隨便按一個鍵就整段沒了。
          多行改成把游標放到最後面。 */
@@ -153,7 +174,7 @@
         if (el.dataset.editing !== '1') return;
         el.dataset.editing = '0';
         // 高度不管有沒有取消都記下來——那是版面偏好，不是內容
-        if (opt.setHeight && input.style.height) opt.setHeight(input.style.height);
+        if (opt.setHeight && input.style.height && input.style.height !== autoH) opt.setHeight(input.style.height);
         if (!cancelled) setValue(input.value);
         el.innerHTML = '';
         paint();
@@ -923,6 +944,7 @@
           function (v) { item.content = v; tab.updatedAt = DB.nowIso(); DB.touch(true); },
           {
             multiline: true,
+            keepHeight: true,      // 點進來時編輯框至少跟顯示時一樣高，畫面不跳（261018a）
             placeholder: '還沒有內容',
             // 整張卡片共用一個高度，跟著資料檔走，匯出匯入與日後的同步都會帶著
             getHeight: function () { return tab.editorHeight; },
@@ -971,8 +993,25 @@
    */
   /** 輸入框高度跟著內容：scrollHeight 不含框線，box-sizing 是 border-box，要把框線加回去 */
   function fitNoteEditor(ta) {
+    if (!ta.isConnected) return;
+    /* 261018a（使用者 10/18：「只要新增內容畫面就會跳到置頂，無法正常打字」）：
+       量高度要先把框設成 auto，那一瞬間框縮回三行、整頁變短，外面的捲動位置被瀏覽器
+       壓回上面；量完把高度設回去，捲動位置卻不會自己回來。所以先記下每一層在捲的
+       位置（小視窗是 body 在捲），量完接回去 */
+    var keep = [];
+    for (var p = ta.parentElement; p; p = p.parentElement) {
+      if (p.scrollTop) keep.push([p, p.scrollTop]);
+    }
+    var se = ta.ownerDocument.scrollingElement;
+    if (se && se.scrollTop && keep.every(function (k) { return k[0] !== se; })) keep.push([se, se.scrollTop]);
+    var old = ta.style.height;
     ta.style.height = 'auto';
-    ta.style.height = (ta.scrollHeight + ta.offsetHeight - ta.clientHeight) + 'px';
+    var h = (ta.scrollHeight + ta.offsetHeight - ta.clientHeight) + 'px';
+    ta.style.height = h;
+    keep.forEach(function (k) { k[0].scrollTop = k[1]; });
+    // 框已經跟內容一樣高，裡面不該再有自己的捲動（之前量錯時會被游標捲進去一截）
+    if (ta.scrollTop) ta.scrollTop = 0;
+    return old !== h;
   }
 
   function renderNotePipEditor(tab, item, wrap, ctx) {
@@ -983,13 +1022,13 @@
     ta.spellcheck = false;
     ta.rows = 3;
     ta.dataset.keep = 'note:' + item.id;
-    function fit() { fitNoteEditor(ta); }
+    function fit() { return fitNoteEditor(ta); }
     ta.addEventListener('input', function () {
       item.content = ta.value;
       tab.updatedAt = DB.nowIso();
       DB.touch(true);
       if (ctx.noteEdited) ctx.noteEdited(tab);
-      fit();
+      fit();     // 游標那一行看不到時，瀏覽器自己會往下捲（沙盒確認過，不另外做）
     });
     // 按鍵不要漏到小視窗的複製鍵去
     ta.addEventListener('keydown', function (e) { e.stopPropagation(); });
