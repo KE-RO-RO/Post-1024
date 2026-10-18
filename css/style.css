@@ -1865,6 +1865,10 @@ body.drawer-open #app { margin-right: 356px; }
   line-height: 1.6;
   white-space: pre-wrap;
   overflow: hidden;
+  /* 261018a（使用者 10/18：滑鼠停在編輯框上滾輪捲不動）：上面 textarea 那條
+     overscroll-behavior: contain 是給「自己會捲」的框用的（11.34）。這個框高度跟著內容、
+     自己不捲，滾輪要整個交給小視窗；留著 contain，Chrome 停在框上時就把滾輪吃掉 */
+  overscroll-behavior: auto;
   resize: none;
   outline: none;
 }
