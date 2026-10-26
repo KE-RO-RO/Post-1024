@@ -697,12 +697,14 @@
         if (out.kind === 'form') {
           out.title = typeof x.title === 'string' ? x.title : '';
           out.fields = normalizeNoteFields(x.fields);
-          /* 懶人欄位（v4.41）：借用欄位型別的格式存，多一個記號與對應規則。
-             舊版程式只認 kind 'form'——它讀到會當成一般欄位，標題與欄位都留著，
-             只是 lazy／maps 被丟掉（對應要重設），不會掉資料（11.63 的教訓） */
+          /* 懶人欄位（v4.41；v4.46 改成「認內容＋就地教」）：借用欄位型別的格式存，
+             多一個記號與學到的東西（learn）。舊版程式只認 kind 'form'——它讀到會當成
+             一般欄位，標題與欄位都留著，只是 lazy／learn 被丟掉（等於忘掉），
+             不會掉資料（11.63 的教訓）。
+             v4.41 的 maps（貼上對應）在這裡轉成學習範例，之後就不再存 maps */
           if (x.lazy === true) {
             out.lazy = true;
-            out.maps = normalizeLazyMaps(x.maps, out.fields);
+            out.learn = normalizeLazyLearn(x.learn, out.fields, x.maps);
           }
         }
         return out;
@@ -741,61 +743,457 @@
   }
 
   /* ============================================================
-     懶人欄位（v4.41，使用者 10/03）
+     懶人欄位 v2「認內容＋就地教」（v4.46；使用者 10/03 定方向、10/19 全部定案）
      ------------------------------------------------------------
-     從別的網頁反白複製一整列表格貼進來，依「對應」自動填進欄位。
-     一組對應 = { id, name, cols: 這一列有幾格, shapes: 每一格的長相, pick: { 欄位id: 第幾格 } }
-     - 存的只有格數、長相、第幾格對哪個欄位；**範例那一列不存**
-     - 欄位名、對應名都是使用者的資料，程式裡不出現任何特定用語
-     ============================================================ */
-  var LAZY_SHAPES = ['e', 'n', 'm', 'd', 'a', 'w', 't'];
+     從別的網頁反白複製一整列表格貼進來，程式**逐格看長相**，把最像的格子
+     填進對應欄位，不必先指定是哪一種表格。認錯或認不出來，就在卡片上
+     點欄位名、再點格子教它一次。**只在教的時候學**（自動填對、沒改的不學，避免學歪）。
 
-  /**
-   * 一格內容的「長相」，用來認出這一列是哪一組對應：
-   * e 空白、n 純數字、m 金額（有小數點或千分位）、d 日期、a 英文開頭接數字、
-   * w 其他英數字、t 其他文字（例如中文）
-   */
-  function lazyShape(v) {
-    v = String(v == null ? '' : v).trim();
-    if (!v) return 'e';
-    if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/.test(v)) return 'd';
-    if (/^\d+$/.test(v)) return 'n';
-    if (/^-?[\d,]*\d\.\d+$/.test(v) || /^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(v)) return 'm';
-    if (/^[A-Za-z]+[_-]?\d[\w-]*$/.test(v)) return 'a';
-    if (/^[\w.@-]+$/.test(v)) return 'w';
-    return 't';
+     學到的東西存在那一筆的 learn：
+       learn[欄位id] = { type: 欄位類型, looks: [長相…] }
+     - type：使用者在管理欄位選的通用類型（編號／金額／日期時間／帳號／短文字），
+       設一次就跨系統通用，沒教過也能先照類型認
+     - looks：教過的長相，**累加不覆蓋**，每個欄位最多 6 種（超過丟最久以前教的）。
+       一種長相只記：
+         c 種類、a 開頭英文幾碼（**只記碼數，不記是哪些字母**——使用者 10/19 選的）、
+         s 英文後面有沒有 _ 或 -、lo／hi 長度範圍（0＝不知道，舊對應轉來的）、
+         d 有沒有小數點、t 有沒有千分位、
+         at 出現在「幾格的一列」的第幾格（[格數, 第幾格]，同分時才用）、u 第幾次教的
+     - **不存任何實際的值或字母**：分享卡片時 learn 跟著走，對方拿到的只有類型與長度
+
+     不是 AI：沒有模型、不連網，只是把特徵記成資料再比對打分，看得到也能忘掉。
+     程式碼裡只有通用的比對方法，不出現任何特定系統的格式（資安規則）。
+     ============================================================ */
+
+  /** 欄位類型。key 存進資料檔，標籤只在畫面上用 */
+  var LAZY_TYPES = [
+    ['', '不指定'], ['id', '編號'], ['amount', '金額'],
+    ['datetime', '日期時間'], ['account', '帳號'], ['text', '短文字']
+  ];
+  var LAZY_TYPE_KEYS = LAZY_TYPES.map(function (x) { return x[0]; });
+  var LAZY_KINDS = ['code', 'num', 'amt', 'dt', 'word', 'text'];
+  var LAZY_MAX_LOOKS = 6;
+  /* 打分：學過的長相（最高 100）＞類型（50／40）＞位置（只在差不多像時用）。
+     第一名跟第二名差不到 LAZY_MARGIN 就算「一樣像」，沒把握就留空不亂填；
+     低於 LAZY_MIN 不算像 */
+  var LAZY_MARGIN = 10;
+  var LAZY_MIN = 30;
+
+  function lazyTypeLabel(key) {
+    for (var i = 0; i < LAZY_TYPES.length; i++) if (LAZY_TYPES[i][0] === key) return LAZY_TYPES[i][1];
+    return LAZY_TYPES[0][1];
   }
 
-  function normalizeLazyMaps(arr, fields) {
-    if (!Array.isArray(arr)) return [];
-    var ids = {};
-    (fields || []).forEach(function (f) { ids[f.id] = true; });
-    var out = [];
-    arr.forEach(function (m) {
-      if (!m || typeof m !== 'object') return;
-      var cols = Math.floor(Number(m.cols));
-      if (!(cols >= 1 && cols <= 200)) return;
-      var shapes = Array.isArray(m.shapes) ? m.shapes.slice(0, cols).map(function (x) {
-        return LAZY_SHAPES.indexOf(x) >= 0 ? x : 't';
-      }) : [];
-      while (shapes.length < cols) shapes.push('t');
-      var pick = {};
-      if (m.pick && typeof m.pick === 'object') {
-        Object.keys(m.pick).forEach(function (fid) {
-          var n = Math.floor(Number(m.pick[fid]));
-          // 欄位被刪掉了、或格子超出範圍的就不留
-          if (ids[fid] && n >= 0 && n < cols) pick[fid] = n;
-        });
-      }
-      out.push({
-        id: typeof m.id === 'string' && m.id ? m.id : uid(),
-        name: String(m.name || '').trim() || ('對應 ' + (out.length + 1)),
-        cols: cols,
-        shapes: shapes,
-        pick: pick
+  /**
+   * 一格內容的長相（特徵）。只看樣子，不留內容。
+   * c：code 英文開頭接數字（中間可有一個 _ 或 -）／num 純數字／
+   *    amt 金額（有小數點、千分位或正負號）／
+   *    dt 日期時間——**一定要有分隔符號**（- / . : 或空白）。連在一起的長串數字
+   *       不算日期：編號裡常常藏著年月日，那還是編號／
+   *    word 其他沒有空白的英數字（可含 . _ @ -）／text 其他（含中文、有空白…）
+   * g：有沒有數字（判斷「編號」用）
+   */
+  function lazyFeat(v) {
+    v = String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+    var f = { c: '', a: 0, s: 0, len: v.length, d: 0, t: 0, g: /\d/.test(v) ? 1 : 0 };
+    if (!v) return f;
+    if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}([ T]\d{1,2}:\d{2}(:\d{2})?)?$/.test(v) ||
+        /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}( \d{1,2}:\d{2}(:\d{2})?)?$/.test(v) ||
+        /^\d{1,2}:\d{2}(:\d{2})?$/.test(v)) {
+      f.c = 'dt';
+      return f;
+    }
+    if (/^\d+$/.test(v)) { f.c = 'num'; return f; }
+    if (/^[-+]?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$/.test(v) && /[.,]|^[-+]/.test(v)) {
+      f.c = 'amt';
+      f.d = v.indexOf('.') >= 0 ? 1 : 0;
+      f.t = v.indexOf(',') >= 0 ? 1 : 0;
+      return f;
+    }
+    var m = /^([A-Za-z]+)([_-]?)\d+$/.exec(v);
+    if (m) { f.c = 'code'; f.a = m[1].length; f.s = m[2] ? 1 : 0; return f; }
+    if (/^[\w.@-]+$/.test(v)) { f.c = 'word'; return f; }
+    f.c = 'text';
+    return f;
+  }
+
+  /**
+   * 這一格符不符合欄位類型：50 很符合、40 勉強、0 不符合。
+   * 「編號」跟「帳號」都是英數字：開頭英文 3 碼以內、8 字以上的偏向編號，開頭英文 4 碼以上的偏向帳號，
+   * 只差 10 分——真的分不清楚時兩個都留空（10/19 跟使用者講過的限制）。
+   * 短的純數字同時像編號又像金額，兩邊都只給 40。
+   */
+  function lazyTypeFit(type, f) {
+    if (!type || !f || !f.c) return 0;
+    switch (type) {
+      case 'id':
+        // 短的英數字（例如 5 碼的代號）也像編號，只給 40，才不會跟真正的編號搶
+        if (f.c === 'code') return f.a <= 3 && f.len >= 8 ? 50 : 40;
+        if (f.c === 'num') return f.len >= 4 ? 40 : 0;
+        if (f.c === 'word') return f.g && f.len >= 6 ? 40 : 0;
+        return 0;
+      case 'amount':
+        if (f.c === 'amt') return 50;
+        if (f.c === 'num') return f.len <= 12 ? 40 : 0;
+        return 0;
+      case 'datetime':
+        return f.c === 'dt' ? 50 : 0;
+      case 'account':
+        if (f.c === 'word') return 50;
+        if (f.c === 'code') return f.a >= 4 ? 50 : 40;
+        return 0;
+      case 'text':
+        if (f.c === 'text') return 50;
+        if ((f.c === 'word' || f.c === 'code') && f.len <= 4) return 40;
+        return 0;
+    }
+    return 0;
+  }
+
+  /** 這一格跟教過的某一種長相有多像（0～100） */
+  function lazyLookScore(k, f) {
+    if (!k || !f || !f.c || k.c !== f.c) return 0;
+    var known = k.lo > 0;               // 舊對應轉來的沒有長度
+    var off = !known ? 0 : (f.len < k.lo ? k.lo - f.len : (f.len > k.hi ? f.len - k.hi : 0));
+    switch (f.c) {
+      case 'code':
+        if (k.a >= 0 && (k.a !== f.a || k.s !== f.s)) return 0;
+        if (!known) return 80;
+        return off === 0 ? 100 : (off <= 2 ? 85 : 65);
+      case 'num':
+        // 純數字長度差一碼以上就是別的東西（例如 6 碼的編號跟 4 位數的整數金額）
+        if (!known) return 80;
+        return off === 0 ? 100 : (off === 1 ? 80 : 0);
+      case 'amt':
+        if (!known) return 80;
+        return k.d === f.d ? 95 : 85;   // 金額的長度本來就不固定，不比
+      case 'dt':
+        if (!known) return 80;
+        return off <= 3 ? 95 : 80;
+      case 'word':
+        if (!known) return 80;
+        return off === 0 ? 95 : (off <= 3 ? 85 : 60);
+      case 'text':
+        if (!known) return 80;
+        return off === 0 ? 90 : (off <= 3 ? 75 : 55);
+    }
+    return 0;
+  }
+
+  /** 一個欄位對一格的分數。pos：教過的長相裡有「同樣格數的一列、同一格」 */
+  function lazyScore(rule, f, idx, n) {
+    rule = rule || {};
+    var best = 0;
+    var pos = false;
+    (rule.looks || []).forEach(function (k) {
+      var s = lazyLookScore(k, f);
+      if (s > best) best = s;
+      if (s >= LAZY_MIN && (k.at || []).some(function (p) { return p[0] === n && p[1] === idx; })) pos = true;
+    });
+    var t = lazyTypeFit(rule.type, f);
+    if (best > 0 && best >= t) return { s: best, via: 'look', pos: pos };
+    if (t > 0) return { s: t, via: 'type', pos: pos };
+    return { s: 0, via: '', pos: false };
+  }
+
+  function lazyHasRule(rule) {
+    return !!rule && (!!rule.type || ((rule.looks || []).length > 0));
+  }
+
+  /**
+   * 貼上一整列：每格對每個欄位打分，一格只給一個欄位。
+   * 1. 分數由高往低配；同一個欄位有兩格差不多像、或同一格有兩個欄位差不多像，
+   *    除非位置分得出來（只有一邊教過「同樣格數、同一格」），否則留空
+   * 2. 刪去法：其他欄位都配完之後，還沒填的欄位在剩下的格子裡只有一格像，就補上（標「補」）
+   * @returns {{ vals: Object, to: Array, mark: Object, amb: Object, any: boolean }}
+   *   vals：欄位id → 值（沒填的是空字串，整筆先清空再填——v4.41 使用者選的）
+   *   to：每一格給了哪個欄位（null＝沒給）
+   *   mark：欄位id → look（認得的長相）／type（靠類型）／elim（刪去法）／amb（好幾格一樣像）／
+   *         none（有類型或學過，但沒有像的）／new（還沒教過、也沒設類型）
+   *   amb：欄位id → 像的那幾格
+   *   any：這一筆有沒有任何欄位學過或設了類型
+   */
+  function lazyGuess(item, cells) {
+    var fields = (item && item.fields) || [];
+    var learn = (item && item.learn) || {};
+    cells = (cells || []).map(function (c) { return String(c == null ? '' : c).trim(); });
+    var n = cells.length;
+    var feats = cells.map(lazyFeat);
+    var pairs = [];
+    var sc = {};
+    fields.forEach(function (fd) {
+      sc[fd.id] = feats.map(function (ft, i) {
+        var x = ft.c ? lazyScore(learn[fd.id], ft, i, n) : { s: 0 };
+        if (x.s >= LAZY_MIN) pairs.push({ f: fd.id, i: i, s: x.s, pos: !!x.pos, via: x.via });
+        return x;
       });
     });
+    pairs.sort(function (a, b) { return b.s - a.s || (b.pos - a.pos) || a.i - b.i; });
+
+    var to = cells.map(function () { return null; });
+    var got = {};
+    var how = {};
+    var amb = {};
+    pairs.forEach(function (p) {
+      if (got[p.f] != null || amb[p.f] || to[p.i] != null) return;
+      var rivals = pairs.filter(function (q) {
+        return q.f === p.f && q.i !== p.i && to[q.i] == null && p.s - q.s < LAZY_MARGIN;
+      });
+      var others = pairs.filter(function (q) {
+        return q.i === p.i && q.f !== p.f && got[q.f] == null && p.s - q.s < LAZY_MARGIN;
+      });
+      if (rivals.length || others.length) {
+        var byPos = p.pos && rivals.every(function (q) { return !q.pos; }) &&
+          others.every(function (q) { return !q.pos; });
+        if (!byPos) {
+          amb[p.f] = [p.i].concat(rivals.map(function (q) { return q.i; }))
+            .sort(function (a, b) { return a - b; });
+          return;
+        }
+      }
+      got[p.f] = p.i;
+      to[p.i] = p.f;
+      how[p.f] = p.via;
+    });
+
+    // 刪去法：還沒填的欄位，剩下的格子裡只有一格像 → 補上。兩個欄位都只剩同一格就不補
+    var changed = true;
+    while (changed) {
+      changed = false;
+      var only = {};
+      fields.forEach(function (fd) {
+        if (got[fd.id] != null) return;
+        var c = [];
+        sc[fd.id].forEach(function (x, i) { if (x.s >= LAZY_MIN && to[i] == null) c.push(i); });
+        if (c.length === 1) only[fd.id] = c[0];
+      });
+      Object.keys(only).forEach(function (fid) {
+        var i = only[fid];
+        if (to[i] != null) return;
+        var clash = Object.keys(only).some(function (g) { return g !== fid && only[g] === i; });
+        if (clash) return;
+        got[fid] = i;
+        to[i] = fid;
+        how[fid] = 'elim';
+        delete amb[fid];
+        changed = true;
+      });
+    }
+
+    var vals = {};
+    var mark = {};
+    var any = false;
+    fields.forEach(function (fd) {
+      var has = lazyHasRule(learn[fd.id]);
+      if (has) any = true;
+      if (got[fd.id] != null) {
+        vals[fd.id] = cells[got[fd.id]];
+        mark[fd.id] = how[fd.id];
+      } else {
+        vals[fd.id] = '';
+        mark[fd.id] = amb[fd.id] ? 'amb' : (has ? 'none' : 'new');
+      }
+    });
+    return { vals: vals, to: to, mark: mark, amb: amb, any: any };
+  }
+
+  /** 貼上之後寫在欄位底下的那一句。warn：有要看一眼或要教的 */
+  function lazyGuessText(item, res) {
+    var fields = (item && item.fields) || [];
+    if (!res.any) {
+      return { text: '這一筆還沒學過，先教它一次：點欄位名，再點下面的格子', warn: true };
+    }
+    var learn = item.learn || {};
+    var name = function (fid) {
+      var f = fields.filter(function (x) { return x.id === fid; })[0];
+      return '「' + (f ? f.label : '') + '」';
+    };
+    var filled = 0;
+    var parts = [];
+    var needTeach = false;
+    var shared = {};      // 好幾個欄位搶同一格
+    fields.forEach(function (f) {
+      var m = res.mark[f.id];
+      if (m === 'look' || m === 'type' || m === 'elim') filled++;
+      if (m === 'type' && ((learn[f.id] || {}).looks || []).length) parts.push(name(f.id) + '是新長相，靠類型認出來');
+      if (m === 'elim') parts.push(name(f.id) + '是刪去法補上的，看一眼');
+      if (m === 'amb') {
+        needTeach = true;
+        var cs = res.amb[f.id] || [];
+        if (cs.length > 1) {
+          parts.push(name(f.id) + '有' + (cs.length === 2 ? '兩' : ' ' + cs.length + ' ') + '格都像（第 ' +
+            cs.map(function (i) { return i + 1; }).join('、') + ' 格），沒把握，留空了');
+        } else {
+          var k = String(cs[0]);
+          (shared[k] = shared[k] || []).push(f.id);
+        }
+      }
+      if (m === 'none') { needTeach = true; parts.push(name(f.id) + '沒找到像的格子'); }
+      if (m === 'new') { needTeach = true; parts.push(name(f.id) + '還沒教過'); }
+    });
+    Object.keys(shared).forEach(function (k) {
+      parts.push(shared[k].map(name).join('') + '都像第 ' + (Number(k) + 1) + ' 格，沒把握，留空了');
+    });
+    if (!parts.length) return { text: '已填入 ' + filled + ' 個欄位', warn: false };
+    return {
+      text: '已填入 ' + filled + ' 個。' + parts.join('；') + (needTeach ? '——點欄位名再點正確的格子' : ''),
+      warn: true
+    };
+  }
+
+  function lazyNormLook(k) {
+    if (!k || typeof k !== 'object' || LAZY_KINDS.indexOf(k.c) < 0) return null;
+    var int = function (v, lo, hi, d) {
+      v = Math.floor(Number(v));
+      return v >= lo && v <= hi ? v : d;
+    };
+    var lo = int(k.lo, 0, 500, 0);
+    var hi = int(k.hi, 0, 500, 0);
+    if (!lo || !hi || lo > hi) { lo = 0; hi = 0; }
+    var at = Array.isArray(k.at) ? k.at.filter(function (p) { return Array.isArray(p) && p.length === 2; })
+      .map(function (p) { return [int(p[0], 1, 200, 0), int(p[1], 0, 199, -1)]; })
+      .filter(function (p) { return p[0] && p[1] >= 0 && p[1] < p[0]; }).slice(-4) : [];
+    return {
+      c: k.c,
+      a: k.c === 'code' ? int(k.a, -1, 40, -1) : 0,
+      s: k.c === 'code' && k.s ? 1 : 0,
+      lo: lo,
+      hi: hi,
+      d: k.c === 'amt' && k.d ? 1 : 0,
+      t: k.c === 'amt' && k.t ? 1 : 0,
+      at: at,
+      u: int(k.u, 0, 1e9, 0)
+    };
+  }
+
+  /** 新教的長相能不能併進舊的（同一種：種類一樣、開頭英文碼數一樣、長度差不多） */
+  function lazySameLook(k, x) {
+    if (k.c !== x.c) return false;
+    if (!(k.lo > 0)) return true;          // 舊對應轉來的（沒有長度）：教一次就補上
+    if (k.c === 'code' && (k.a !== x.a || k.s !== x.s)) return false;
+    if (k.c === 'amt' || k.c === 'dt') return true;
+    return x.lo >= k.lo - 3 && x.hi <= k.hi + 3;
+  }
+
+  function lazyAddLook(r, k) {
+    var hit = r.looks.filter(function (x) { return lazySameLook(x, k); })[0];
+    if (hit) {
+      if (!(hit.lo > 0)) {
+        hit.a = k.a; hit.s = k.s; hit.lo = k.lo; hit.hi = k.hi;
+      } else if (k.lo > 0) {
+        hit.lo = Math.min(hit.lo, k.lo);
+        hit.hi = Math.max(hit.hi, k.hi);
+      }
+      hit.d = hit.d || k.d ? 1 : 0;
+      hit.t = hit.t || k.t ? 1 : 0;
+      k.at.forEach(function (p) {
+        var i = -1;
+        hit.at.forEach(function (q, j) { if (q[0] === p[0] && q[1] === p[1]) i = j; });
+        if (i >= 0) hit.at.splice(i, 1);
+        hit.at.push(p);
+      });
+      if (hit.at.length > 4) hit.at = hit.at.slice(-4);
+      hit.u = Math.max(hit.u, k.u);
+      return;
+    }
+    r.looks.push(k);
+    if (r.looks.length > LAZY_MAX_LOOKS) {
+      var old = 0;
+      r.looks.forEach(function (x, j) { if (x.u < r.looks[old].u) old = j; });
+      r.looks.splice(old, 1);
+    }
+  }
+
+  /**
+   * 就地教：「這個欄位是這一格」。只記長相，不記值。
+   * @returns {boolean} 有沒有學到東西（空白格不學）
+   */
+  function lazyLearn(item, fid, cells, idx) {
+    if (!item || !fid) return false;
+    var v = String((cells || [])[idx] == null ? '' : cells[idx]).trim();
+    var f = lazyFeat(v);
+    if (!f.c) return false;
+    item.learn = item.learn && typeof item.learn === 'object' ? item.learn : {};
+    var r = item.learn[fid];
+    if (!r) r = item.learn[fid] = { type: '', looks: [] };
+    if (!Array.isArray(r.looks)) r.looks = [];
+    var u = 0;
+    r.looks.forEach(function (x) { if (x.u > u) u = x.u; });
+    lazyAddLook(r, {
+      c: f.c, a: f.c === 'code' ? f.a : 0, s: f.s, lo: f.len, hi: f.len, d: f.d, t: f.t,
+      at: [[cells.length, idx]], u: u + 1
+    });
+    return true;
+  }
+
+  /** 舊的「貼上對應」（v4.41）裡每一格的長相代號 → 新的種類 */
+  var LAZY_OLD_SHAPE = { n: 'num', m: 'amt', d: 'dt', a: 'code', w: 'word', t: 'text' };
+
+  /**
+   * 整理 learn：欄位刪掉了就丟、類型不認得的當成「不指定」、長相逐一檢查。
+   * maps 是 v4.41 的「貼上對應」：每一組裡「第幾格對哪個欄位」轉成一種長相
+   * （只有種類與位置，沒有長度），之後就不再存 maps（使用者選「整個換掉」）
+   */
+  function normalizeLazyLearn(learn, fields, maps) {
+    var ids = {};
+    (fields || []).forEach(function (f) { ids[f.id] = true; });
+    var out = {};
+    if (learn && typeof learn === 'object' && !Array.isArray(learn)) {
+      Object.keys(learn).forEach(function (fid) {
+        var r = learn[fid];
+        if (!ids[fid] || !r || typeof r !== 'object') return;
+        var type = LAZY_TYPE_KEYS.indexOf(r.type) >= 0 ? r.type : '';
+        var looks = Array.isArray(r.looks) ? r.looks.map(lazyNormLook).filter(Boolean) : [];
+        if (looks.length > LAZY_MAX_LOOKS) {
+          var keep = looks.slice().sort(function (a, b) { return b.u - a.u; }).slice(0, LAZY_MAX_LOOKS);
+          looks = looks.filter(function (x) { return keep.indexOf(x) >= 0; });
+        }
+        if (type || looks.length) out[fid] = { type: type, looks: looks };
+      });
+    }
+    if (Array.isArray(maps)) {
+      maps.forEach(function (m) {
+        if (!m || typeof m !== 'object' || !m.pick || typeof m.pick !== 'object') return;
+        var cols = Math.floor(Number(m.cols));
+        if (!(cols >= 1 && cols <= 200)) return;
+        Object.keys(m.pick).forEach(function (fid) {
+          var i = Math.floor(Number(m.pick[fid]));
+          if (!ids[fid] || !(i >= 0 && i < cols)) return;
+          var c = LAZY_OLD_SHAPE[Array.isArray(m.shapes) ? m.shapes[i] : ''];
+          if (!c) return;
+          var r = out[fid] || (out[fid] = { type: '', looks: [] });
+          var same = r.looks.filter(function (x) { return x.c === c && !(x.lo > 0); })[0];
+          if (same) {
+            if (!same.at.some(function (p) { return p[0] === cols && p[1] === i; })) same.at.push([cols, i]);
+            if (same.at.length > 4) same.at = same.at.slice(-4);
+            return;
+          }
+          if (r.looks.length >= LAZY_MAX_LOOKS) return;
+          r.looks.push({ c: c, a: c === 'code' ? -1 : 0, s: 0, lo: 0, hi: 0, d: 0, t: 0, at: [[cols, i]], u: 0 });
+        });
+      });
+    }
     return out;
+  }
+
+  /** 管理欄位裡給人看的：一種長相寫成一句話。不含任何實際的字 */
+  function lazyLookText(k) {
+    var len = k.lo > 0 ? (k.lo === k.hi ? k.lo + ' 字' : k.lo + '～' + k.hi + ' 字') : '';
+    var head;
+    switch (k.c) {
+      case 'code':
+        head = k.a < 0 ? '英文開頭＋數字' : '英文 ' + k.a + ' 碼＋' + (k.s ? '符號＋' : '') + '數字';
+        break;
+      case 'num': head = '純數字'; break;
+      case 'amt':
+        head = '金額' + (k.d ? '，有小數點' : '') + (k.t ? '，有千分位' : '');
+        len = '';
+        break;
+      case 'dt': head = '日期時間'; len = ''; break;
+      case 'word': head = '英數字'; break;
+      default: head = '文字';
+    }
+    return head + (len ? '，' + len : '') + (k.lo > 0 ? '' : '（舊對應轉來的）');
   }
 
   /** 純文字貼上：第一個有內容的那一行，用 Tab 切。表格複製出來的純文字就是這樣 */
@@ -805,48 +1203,6 @@
     if (!lines.length) return [];
     var cells = lines[0].split('\t').map(function (c) { return c.replace(/\s+/g, ' ').trim(); });
     return cells;
-  }
-
-  /**
-   * 這一列是哪一組對應。先看格數，再看每一格的長相有幾格一樣。
-   * @returns {{ map: Object }|{ choices: Object[] }|null}
-   *   map：認得出來；choices：有兩組以上一樣像，讓使用者選；null：認不出來
-   */
-  function lazyMatch(item, cells) {
-    var maps = (item && item.maps) || [];
-    var shapes = (cells || []).map(lazyShape);
-    var scored = maps.filter(function (m) { return m.cols === shapes.length; }).map(function (m) {
-      var same = 0;
-      shapes.forEach(function (sh, i) { if (m.shapes[i] === sh) same++; });
-      return { map: m, score: same / shapes.length };
-    }).filter(function (x) { return x.score >= 0.6; })
-      .sort(function (a, b) { return b.score - a.score; });
-    if (!scored.length) return null;
-    var top = scored.filter(function (x) { return x.score === scored[0].score; });
-    if (top.length > 1) return { choices: top.map(function (x) { return x.map; }) };
-    return { map: scored[0].map };
-  }
-
-  /** 依對應算出每個欄位要填什麼。對應不到的欄位是空白（使用者選的：整筆先清空再填） */
-  function lazyFill(item, map, cells) {
-    var vals = {};
-    (item.fields || []).forEach(function (f) {
-      var n = map.pick[f.id];
-      vals[f.id] = typeof n === 'number' && cells[n] != null ? String(cells[n]).trim() : '';
-    });
-    return vals;
-  }
-
-  /** 存一組對應。範例那一列只拿來算格數與長相，不存 */
-  function lazyMakeMap(name, cells, pick, oldId) {
-    var cols = cells.length;
-    var p = {};
-    Object.keys(pick || {}).forEach(function (fid) {
-      var n = Math.floor(Number(pick[fid]));
-      if (n >= 0 && n < cols) p[fid] = n;
-    });
-    return { id: oldId || uid(), name: String(name || '').trim() || '未命名', cols: cols,
-             shapes: cells.map(lazyShape), pick: p };
   }
 
   /** 欄位名與預設值之間的分隔：全形或半形冒號，取第一個 */
@@ -3023,12 +3379,17 @@
     isShareData: isShareData,
     previewShare: previewShare,
     importCards: importCards,
-    lazyShape: lazyShape,
+    LAZY_TYPES: LAZY_TYPES,
+    lazyTypeLabel: lazyTypeLabel,
+    lazyFeat: lazyFeat,
+    lazyTypeFit: lazyTypeFit,
+    lazyLookScore: lazyLookScore,
+    lazyGuess: lazyGuess,
+    lazyGuessText: lazyGuessText,
+    lazyLearn: lazyLearn,
+    lazyLookText: lazyLookText,
+    normalizeLazyLearn: normalizeLazyLearn,
     lazyCellsFromText: lazyCellsFromText,
-    lazyMatch: lazyMatch,
-    lazyFill: lazyFill,
-    lazyMakeMap: lazyMakeMap,
-    normalizeLazyMaps: normalizeLazyMaps,
     PALETTE: PALETTE,
     paletteName: paletteName,
     TYPE_COLOR: TYPE_COLOR,
