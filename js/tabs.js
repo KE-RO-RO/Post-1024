@@ -613,6 +613,12 @@
 
   var noteVals = {};
 
+  /* 懶人欄位 v2（v4.46）這次貼的格子與每個欄位的記號。跟 noteVals 一樣只在記憶體、不存：
+     lazyState[一筆的 id] = { cells, to: 每一格給了哪個欄位, mark, amb, any, msg, warn,
+                             teach: 正在教的欄位, open: 格子排有沒有展開,
+                             snap: 這次貼上教過的欄位「教之前」的樣子（同一次改教時退回用） } */
+  var lazyState = {};
+
   function noteVal(item, f) {
     var m = noteVals[item.id];
     return m && Object.prototype.hasOwnProperty.call(m, f.id) ? m[f.id] : (f.def || '');
@@ -644,8 +650,9 @@
   }
 
   /* ============================================================
-     懶人欄位（v4.41，使用者 10/03）：貼一整列表格，自動填進欄位
+     懶人欄位（v4.41，使用者 10/03；v4.46 改成認內容＋就地教）：貼一整列表格，自動填進欄位
      ------------------------------------------------------------
+     怎麼認、怎麼學在 data.js 的 lazyGuess／lazyLearn；這裡只管拆格子與畫面。
      剪貼簿有表格（text/html 的 <td>）就用它拆——儲存格裡的換行、按鈕文字都還在原本那一格；
      沒有才用純文字的 Tab 分隔。只拆出一格的不攔，照一般貼上貼進游標那一欄。
      ============================================================ */
@@ -683,6 +690,10 @@
 
     var fields = item.fields || [];
     var inputs = [];
+    var labels = [];
+    // 懶人欄位重畫格子與記號用；一般欄位是空的（一鍵清空會呼叫）
+    var paintLazyFn = null;
+    function paintLazy() { if (paintLazyFn) paintLazyFn(); }
     if (fields.length) {
       var rows = document.createElement('div');
       rows.className = 'nf-rows';
@@ -690,7 +701,17 @@
         var l = document.createElement('span');
         l.className = 'nf-label';
         l.title = f.label;   // 欄位名太長被截掉時，滑過去看得到全文
-        setText(l, f.label);
+        if (item.lazy) {
+          // 懶人欄位：名字另外包一層自己出刪節號，後面的 ✓／補／琥珀點才不會被切掉
+          l.classList.add('nf-lzl');
+          var lt = document.createElement('span');
+          lt.className = 'nf-ltxt';
+          setText(lt, f.label);
+          l.appendChild(lt);
+        } else {
+          setText(l, f.label);
+        }
+        labels.push(l);
         rows.appendChild(l);
 
         var inp = document.createElement('input');
@@ -745,6 +766,8 @@
       var blank = {};
       fields.forEach(function (f) { blank[f.id] = ''; });
       noteVals[item.id] = blank;
+      // 懶人欄位：這次貼的格子也是貼上來的內容，一起清掉
+      if (lazyState[item.id]) { delete lazyState[item.id]; paintLazy(); }
       // 直接改輸入框就好，不重畫（11.20）
       inputs.forEach(function (inp) { inp.value = ''; });
       if (inputs[0]) inputs[0].focus();
@@ -763,25 +786,9 @@
       acts.appendChild(mg);
     }
 
-    if (item.lazy && !RO) {
-      var lm = document.createElement('button');
-      lm.className = 'nf-btn';
-      lm.textContent = '貼上對應';
-      lm.title = '教它認一種表格：貼一列範例，選每個欄位要拿第幾格';
-      lm.addEventListener('click', function (e) {
-        e.stopPropagation();
-        if (ctx.editLazyMaps) ctx.editLazyMaps(tab, item);
-      });
-      acts.appendChild(lm);
-    }
-
     var tip = document.createElement('span');
     tip.className = 'nf-hint';
-    tip.textContent = item.lazy
-      ? ((item.maps || []).length
-          ? '在這一筆按 Ctrl + V 貼一整列，自動填入（' + item.maps.length + ' 組對應）'
-          : (RO ? '還沒有對應，請到主視窗按「貼上對應」設定' : '先按「貼上對應」設定，之後貼一整列就自動填'))
-      : '複製不含標題，空欄位也會印';
+    tip.textContent = item.lazy ? '在這一筆按 Ctrl + V 貼一整列' : '複製不含標題，空欄位也會印';
     acts.appendChild(tip);
 
     fb.appendChild(acts);
@@ -792,66 +799,274 @@
     /* 點這一筆的空白處也能貼：讓整塊可以拿到焦點，Ctrl + V 才會送到這裡 */
     fb.tabIndex = 0;
 
-    function fillWith(map, cells) {
-      var vals = DB.lazyFill(item, map, cells);
-      var n = 0;
-      var next = {};
-      fields.forEach(function (f, i) {
-        next[f.id] = vals[f.id] || '';
-        if (next[f.id]) n++;
-        if (inputs[i]) inputs[i].value = next[f.id];
-      });
-      noteVals[item.id] = next;          // 整筆先清空再填（使用者選的）
-      var old = fb.querySelector('.lz-choose');
-      if (old) old.remove();
-      Clip.toast('已依「' + map.name + '」填入 ' + n + ' 個欄位', false, fb.ownerDocument);
+    /* ---------- 懶人欄位 v2：貼上自動認＋就地教（v4.46） ---------- */
+
+    var doc = fb.ownerDocument;
+    var msgEl = null;
+    var stripEl = null;
+
+    function fieldIndex(fid) {
+      for (var i = 0; i < fields.length; i++) if (fields[i].id === fid) return i;
+      return -1;
+    }
+    function fieldName(fid) {
+      var i = fieldIndex(fid);
+      return i >= 0 ? '「' + fields[i].label + '」' : '';
+    }
+    function setVal(fid, v) {
+      var i = fieldIndex(fid);
+      if (i < 0) return;
+      setNoteVal(item, fields[i], v);
+      if (inputs[i]) inputs[i].value = v;
+    }
+    /* 教的時候寫進「現在資料裡的那一筆」：雲端下載可能已經把整份資料換掉，
+       手上這個 item 是舊的（11.67 同一個病） */
+    function liveTarget() {
+      var t = DB.findTab(tab.id);
+      var it = t && (t.items || []).filter(function (x) { return x.id === item.id; })[0];
+      return it ? { tab: t, item: it } : null;
     }
 
-    function choose(list, cells) {
-      var old = fb.querySelector('.lz-choose');
-      if (old) old.remove();
-      var d = fb.ownerDocument;
-      var bar = d.createElement('div');
-      bar.className = 'lz-choose';
-      var lead = d.createElement('span');
-      lead.textContent = '這一列像好幾組，選一個：';
-      bar.appendChild(lead);
-      list.forEach(function (m) {
-        var b = d.createElement('button');
-        b.type = 'button';
-        b.className = 'nf-btn';
-        b.textContent = m.name;
-        b.addEventListener('click', function (e) { e.stopPropagation(); fillWith(m, cells); });
-        bar.appendChild(b);
-      });
-      var x = d.createElement('button');
-      x.type = 'button';
-      x.className = 'nf-btn';
-      x.textContent = '取消';
-      x.addEventListener('click', function (e) { e.stopPropagation(); bar.remove(); });
-      bar.appendChild(x);
-      fb.insertBefore(bar, fb.firstChild);
+    /* 同一次貼上裡改教：先把這個欄位「這次教的」退回去再學新的，教錯馬上改正不會留下錯的長相。
+       snap 是這次貼上第一次教這個欄位之前的樣子 */
+    function undoThisPaste(st, live, fid) {
+      if (!st.snap || !Object.prototype.hasOwnProperty.call(st.snap, fid)) return false;
+      var learn = live.item.learn || (live.item.learn = {});
+      if (st.snap[fid]) learn[fid] = JSON.parse(JSON.stringify(st.snap[fid]));
+      else delete learn[fid];
+      delete st.snap[fid];
+      return true;
     }
+    function keepSnap(st, live, fid) {
+      st.snap = st.snap || {};
+      if (Object.prototype.hasOwnProperty.call(st.snap, fid)) return;
+      var r = (live.item.learn || {})[fid];
+      st.snap[fid] = r ? JSON.parse(JSON.stringify(r)) : null;
+    }
+
+    function teachTo(i) {
+      var st = lazyState[item.id];
+      if (!st || !st.teach) return;
+      var fid = st.teach;
+      var live = liveTarget();
+      if (!live) { Clip.toast('這一筆已經不在了', true, doc); return; }
+      st.teach = null;
+      var undone = undoThisPaste(st, live, fid);
+      // 這個欄位原本拿的格子放掉
+      st.to = st.to.map(function (x) { return x === fid ? null : x; });
+      if (i < 0) {
+        // 「這欄留空」：這次沒有它的格子，不學
+        setVal(fid, '');
+        st.mark[fid] = 'skip';
+        st.msg = fieldName(fid) + '這次留空（不學）';
+        st.warn = false;
+        paintLazy();
+        if (undone) { live.tab.updatedAt = DB.nowIso(); DB.touch(true); }
+        return;
+      }
+      // 這一格原本給了別的欄位：一格只給一個欄位，那個欄位改成留空。
+      // 那個欄位如果是這次貼上才教的，教的也退回去（教錯了才會被搶走）
+      var prev = st.to[i];
+      if (prev && prev !== fid) {
+        setVal(prev, '');
+        st.mark[prev] = 'none';
+        if (undoThisPaste(st, live, prev)) undone = true;
+      }
+      st.to[i] = fid;
+      setVal(fid, st.cells[i]);
+      st.mark[fid] = 'taught';
+      keepSnap(st, live, fid);
+      var learned = DB.lazyLearn(live.item, fid, st.cells, i);
+      st.msg = (learned ? '記住了' + fieldName(fid) + '的長相，下次會自動認' : fieldName(fid) + '填好了（空白格不學）') +
+        (prev && prev !== fid ? '；' + fieldName(prev) + '改成留空' : '');
+      st.warn = !!(prev && prev !== fid);
+      paintLazy();
+      if (learned || undone) {
+        live.tab.updatedAt = DB.nowIso();
+        // 只存檔＋排雲端同步，不重畫主畫面（點擊進行中，11.20）；小視窗會跟著重畫
+        DB.touch(true);
+      }
+    }
+
+    function startTeach(fid) {
+      var st = lazyState[item.id];
+      if (!st) return;
+      st.open = true;
+      st.teach = st.teach === fid ? null : fid;
+      if (st.teach) {
+        st.msg = '正在教' + fieldName(fid) + '：點它對應的格子（沒有就點「這欄留空」）';
+        st.warn = false;
+      }
+      paintLazy();
+    }
+
+    labels.forEach(function (l, n) {
+      var fid = fields[n].id;
+      l.addEventListener('click', function (e) {
+        if (!lazyState[item.id]) return;      // 還沒貼過：欄位名就只是欄位名
+        e.stopPropagation();
+        startTeach(fid);
+      });
+      l.addEventListener('keydown', function (e) {
+        if (!lazyState[item.id]) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); startTeach(fid); }
+      });
+    });
+
+    function makeStrip(st) {
+      var w = doc.createElement('div');
+      w.className = 'lz-strip';
+      var h = doc.createElement('div');
+      h.className = 'lz-strip-h';
+      var b = doc.createElement('b');
+      b.textContent = '這次貼的格子';
+      h.appendChild(b);
+      var how = doc.createElement('span');
+      how.textContent = (st.any ? '改正：' : '') + '點欄位名 → 點格子';
+      h.appendChild(how);
+      var x = doc.createElement('button');
+      x.type = 'button';
+      x.className = 'lz-x pip-ok';
+      x.textContent = '收起';
+      x.addEventListener('click', function (e) {
+        e.stopPropagation();
+        st.open = false;
+        st.teach = null;
+        paintLazy();
+      });
+      h.appendChild(x);
+      w.appendChild(h);
+
+      var cs = doc.createElement('div');
+      cs.className = 'lz-chips';
+      st.cells.forEach(function (v, i) {
+        var c = doc.createElement('button');
+        c.type = 'button';
+        c.className = 'lz-chip pip-ok' + (st.to[i] ? ' used' : '') + (v ? '' : ' blank');
+        c.dataset.i = String(i);
+        var no = doc.createElement('small');
+        no.textContent = String(i + 1);
+        c.appendChild(no);
+        var tx = doc.createElement('span');
+        tx.className = 'lz-v';
+        tx.textContent = v || '（空白）';
+        c.appendChild(tx);
+        c.title = v;
+        if (st.to[i] && fieldIndex(st.to[i]) >= 0) {
+          var to = doc.createElement('span');
+          to.className = 'lz-to';
+          to.textContent = '→ ' + fields[fieldIndex(st.to[i])].label;
+          c.appendChild(to);
+        }
+        c.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (!st.teach) {
+            st.msg = '先點上面的欄位名，再點格子';
+            st.warn = true;
+            paintLazy();
+            return;
+          }
+          teachTo(i);
+        });
+        cs.appendChild(c);
+      });
+      var none = doc.createElement('button');
+      none.type = 'button';
+      none.className = 'lz-chip lz-empty pip-ok';
+      none.textContent = '這欄留空';
+      none.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (!st.teach) {
+          st.msg = '先點上面的欄位名，再點「這欄留空」';
+          st.warn = true;
+          paintLazy();
+          return;
+        }
+        teachTo(-1);
+      });
+      cs.appendChild(none);
+      w.appendChild(cs);
+      return w;
+    }
+
+    // 只改這一筆裡面的東西，不重畫整張卡片（11.20）
+    function paintLazyNow() {
+      var st = lazyState[item.id];
+      labels.forEach(function (l, i) {
+        var f = fields[i];
+        var old = l.querySelector('.lz-mark');
+        if (old) old.remove();
+        l.classList.remove('lz-pick', 'lz-teach');
+        l.removeAttribute('tabindex');
+        l.removeAttribute('role');
+        if (inputs[i]) inputs[i].classList.remove('lz-warn');
+        if (!st) return;
+        l.classList.add('lz-pick');
+        l.tabIndex = 0;
+        l.setAttribute('role', 'button');
+        if (st.teach === f.id) l.classList.add('lz-teach');
+        var m = st.mark[f.id];
+        var mk = doc.createElement('span');
+        if (m === 'look' || m === 'type' || m === 'taught') {
+          mk.className = 'lz-mark lz-ok';
+          mk.textContent = '✓';
+          mk.title = m === 'type' ? '靠欄位類型認出來的' : (m === 'taught' ? '剛剛教的' : '認得的長相');
+        } else if (m === 'elim') {
+          mk.className = 'lz-mark lz-elim';
+          mk.textContent = '補';
+          mk.title = '刪去法補上的：剩下的格子只有這一格像，看一眼';
+          if (inputs[i]) inputs[i].classList.add('lz-warn');
+        } else if (m === 'amb' || m === 'none' || m === 'new') {
+          mk.className = 'lz-mark lz-dot';
+          mk.title = m === 'amb' ? '好幾格一樣像，沒把握，留空了' : (m === 'new' ? '還沒教過' : '沒找到像的格子');
+          if (m === 'amb' && inputs[i]) inputs[i].classList.add('lz-warn');
+        } else {
+          mk = null;
+        }
+        if (mk) l.appendChild(mk);
+      });
+
+      if (msgEl) { msgEl.remove(); msgEl = null; }
+      if (stripEl) { stripEl.remove(); stripEl = null; }
+      if (!st) return;
+      if (st.msg) {
+        msgEl = doc.createElement('div');
+        msgEl.className = 'lz-msg' + (st.warn ? ' warn' : '');
+        msgEl.textContent = st.msg;
+        fb.insertBefore(msgEl, acts);
+      }
+      if (st.open) {
+        stripEl = makeStrip(st);
+        fb.insertBefore(stripEl, acts);
+      }
+    }
+    paintLazyFn = paintLazyNow;
+    paintLazyNow();
 
     fb.addEventListener('paste', function (e) {
       var cells = lazyCellsFromClipboard(e.clipboardData);
       if (cells.length < 2) return;      // 只有一格：照一般貼上，貼進游標那一欄
       e.preventDefault();
       e.stopPropagation();
-      var d = fb.ownerDocument;
-      if (!(item.maps || []).length) {
-        Clip.toast(RO ? '這一筆還沒有對應，請到主視窗按「貼上對應」設定'
-                      : '這一筆還沒有對應，請先按「貼上對應」設定', true, d);
+      if (!fields.length) {
+        Clip.toast(RO ? '這一筆還沒有欄位，請到主視窗按「管理欄位」設定' : '這一筆還沒有欄位，先按「管理欄位」設定', true, doc);
         return;
       }
-      var r = DB.lazyMatch(item, cells);
-      if (!r) {
-        Clip.toast('認不出這一列（' + cells.length + ' 格）是哪一組對應。' +
-          (RO ? '請到主視窗的「貼上對應」新增一組' : '請用「貼上對應」新增一組'), true, d);
-        return;
-      }
-      if (r.choices) { choose(r.choices, cells); return; }
-      fillWith(r.map, cells);
+      var res = DB.lazyGuess(item, cells);
+      var t = DB.lazyGuessText(item, res);
+      // 整筆先清空再填（v4.41 使用者選的）：沒認出來的、手打的、預設值都變空白
+      var next = {};
+      fields.forEach(function (f, i) {
+        next[f.id] = res.vals[f.id] || '';
+        if (inputs[i]) inputs[i].value = next[f.id];
+      });
+      noteVals[item.id] = next;
+      lazyState[item.id] = {
+        cells: cells.map(function (c) { return String(c == null ? '' : c).trim(); }),
+        to: res.to, mark: res.mark, amb: res.amb, any: res.any,
+        msg: t.text, warn: t.warn, teach: null, open: true
+      };
+      paintLazyNow();
     });
   }
 
@@ -871,6 +1086,7 @@
       var overlay = open && !titleText;
       wrap.className = 'nt-item' + (open ? ' open' : '') + (isForm ? ' nt-form' : '') +
         (overlay ? ' nt-overlay' : '');
+      wrap.dataset.itemId = item.id;
 
       var head = document.createElement('div');
       head.className = 'nt-head';
@@ -920,6 +1136,7 @@
             tab.items = tab.items.filter(function (x) { return x.id !== item.id; });
             tab.items.forEach(function (x, n) { x.order = n; });
             delete noteVals[item.id];
+            delete lazyState[item.id];
             tab.updatedAt = DB.nowIso();
             DB.touch();
           }
