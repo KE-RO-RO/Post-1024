@@ -7,6 +7,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- 網頁安全政策 CSP（261106a）：規定這一頁只能跑哪些程式、只能連去哪裡。
+     就算哪天又有一處把使用者的字當成 HTML 插進去，藏在裡面的 onerror 之類
+     也不會執行，資料也送不到 Google 以外的地方。
+       script-src  只跑自己儲存庫的 js 與 Google 登入元件；wasm-unsafe-eval 給 QR 辨識的 WebAssembly
+       connect-src 只能連 Google 的 Drive／帳號 API
+       style-src   unsafe-inline 是因為程式大量用 style 屬性與自訂配色的 <style>（只放驗過的色碼）
+       img-src     data:／blob: 給貼上的 QR 截圖
+       file:       讓檔案總管雙擊 index.html 的本機測試照樣能跑；放在 https 網頁上不會有任何作用
+     要加新的對外連線或第三方檔案時，這裡一定要跟著改，而且要先想清楚。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file: 'wasm-unsafe-eval' https://accounts.google.com/gsi/client; style-src 'self' file: 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' file: data: blob:; font-src 'self' file:; connect-src https://www.googleapis.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
 <title>便籤／常用語工具</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
