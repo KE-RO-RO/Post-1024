@@ -306,14 +306,14 @@
       ['清除這個分類的所有卡片', function () {
         closeModal();
         confirmModal('清除內容',
-          '將刪除「' + cat.name + '」底下的所有卡片，分類本身會保留。<br><br>'
+          '將刪除「' + escapeText(cat.name) + '」底下的所有卡片，分類本身會保留。<br><br>'
           + deleteTail(true),
           '確定清除', function () { DB.clearCategory(cat.id); }, true);
       }],
       ['刪除整個分類', function () {
         closeModal();
         confirmModal('刪除分類',
-          '將刪除「' + cat.name + '」以及底下的所有卡片。<br><br>' + deleteTail(true),
+          '將刪除「' + escapeText(cat.name) + '」以及底下的所有卡片。<br><br>' + deleteTail(true),
           '確定刪除', function () {
             DB.deleteCategory(cat.id);
             if (state.currentCategoryId === cat.id) state.currentCategoryId = null;
@@ -1405,7 +1405,7 @@
       var toPlain = function () {
         Vault.decryptFor(tab.id, tab.enc).then(function (list) {
           confirmModal('取消加密',
-            '「' + (tab.title || '未命名') + '」的 ' + (list || []).length + ' 筆內容會改成' +
+            '「' + escapeText(tab.title || '未命名') + '」的 ' + (list || []).length + ' 筆內容會改成' +
             '<strong>明文</strong>存放，任何能打開這個瀏覽器的人都看得到，' +
             '匯出檔裡也會是明文。<br><br>內容本身不會遺失，之後可以再加回密碼保護。',
             '改為不加密',
@@ -1436,7 +1436,7 @@
     }
 
     confirmModal('加上密碼保護',
-      '「' + (tab.title || '未命名') + '」的內容會被加密，之後要輸入主密碼才看得到。',
+      '「' + escapeText(tab.title || '未命名') + '」的內容會被加密，之後要輸入主密碼才看得到。',
       '繼續', function () {
         /* 旗標與 entries 都等成功了才動。中途取消密碼彈窗的話，
            卡片要維持原狀，不能留下一個空殼。 */
@@ -3473,7 +3473,7 @@
       row.appendChild(Tabs.iconBtn('✕', '刪除', function () {
         closeModal();
         confirmModal('刪除選項',
-          '將刪除「' + opt.name + '」。<br><br>此動作無法復原。',
+          '將刪除「' + escapeText(opt.name) + '」。<br><br>此動作無法復原。',
           '確定刪除', function () {
             var i = list.indexOf(opt);
             if (i >= 0) list.splice(i, 1);
@@ -3898,7 +3898,7 @@
       row.appendChild(Tabs.iconBtn('✕', '永久刪除', function () {
         closeModal();
         confirmModal('永久刪除',
-          '將永久刪除「' + (e.name || '未命名') + '」。<br><br>此動作無法復原。',
+          '將永久刪除「' + escapeText(e.name || '未命名') + '」。<br><br>此動作無法復原。',
           '永久刪除', function () {
             DB.purgeTrashItem(e.id);
             back();
@@ -4037,10 +4037,8 @@
 
   /** 使用者自己打的字要進 HTML，先把角括號與 & 換掉（對照 tabs.js 的 setText）。 */
   function escapeText(s) {
-    return String(s == null ? '' : s)
-      .split('&').join('&amp;')
-      .split('<').join('&lt;')
-      .split('>').join('&gt;');
+    // 261106a 起統一走 DB.escapeHtml（多跳脫了引號，放進屬性也安全）
+    return DB.escapeHtml(s);
   }
 
   /** 重繪時順手看一眼，但不要每次都掃——三秒內只掃一次。 */
@@ -4262,8 +4260,8 @@
       });
       var doExport = function () {
         DB.saveNow();
-        download('便籤資料_' + stamp() + '.json', DB.exportJson());
-        Clip.toast('已匯出');
+        download('便籤資料_' + stamp() + '.json', DB.exportJson({ noTrash: true }));
+        Clip.toast(DB.trashCount() ? '已匯出（最近刪除的不會放進檔案）' : '已匯出');
       };
       // 匯出檔裡的加密內容是密文，但仍先驗一次身分才放行
       if (locked.length) askSecret(locked[0], doExport);
@@ -4374,11 +4372,13 @@
       '按雲朵登入時會讓你選帳號，也可以輸入其他帳號；這個分頁裡已經是別的帳號的資料時，會先問你要不要換',
       '重新整理後如果沒有自動登入會跳提醒；重新登入之前改的東西都還在，登入後會補傳。' +
         '另一台在這段時間也改過的話，會問你要留哪一邊',
-      '建議偶爾「匯出資料」留一份：雲端那份跟著你改，誤刪也會同步過去',
+      '建議偶爾「匯出資料」留一份：雲端那份跟著你改，誤刪也會同步過去。<b>匯出的檔案不含最近刪除</b>（刪掉的東西不會跟著檔案跑出去）',
       '<b>給別人卡片</b>：☰「匯出卡片給別人」（或卡片 ⋯「匯出這張給別人」）存成檔案，' +
         '對方用「匯入資料」選那個檔，會<b>加成新卡片</b>（放進同名的分類，沒有就新建），不會蓋掉他原本的東西。' +
         '加密的連結收藏與 TOTP 不能匯出；連結收藏預設不含帳號、密碼、備忘',
-      '<b>最近刪除</b>：刪掉的卡片先放這裡，可以還原（留 ' + DB.TRASH_DAYS + ' 天、最多 ' + DB.TRASH_MAX + ' 張）',
+      '<b>最近刪除</b>：刪掉的卡片先放這裡，可以還原（留 ' + DB.TRASH_DAYS + ' 天、最多 ' + DB.TRASH_MAX + ' 張）。' +
+        '雲端同步會一起帶著，換電腦也還原得了；「匯出資料」的檔案不帶',
+      '<b>別人給的檔案</b>：只匯入信得過的人傳來的。匯入前會先列出裡面有哪些卡片，看到不認得的就取消',
       '<b>分頁暫存</b>：☰ 最下面的百分比，約 5MB，超過 80% 會提醒',
       '<b>真的滿了</b>：① 先匯出留底 ② 最近刪除全部清空 ③ 找出大東西（常見是整篇文章貼進便籤）' +
         ' ④ 最後手段：匯出 → 關分頁重開 → 匯入'
@@ -4407,7 +4407,8 @@
       ['重新整理後要重新登入？', '瀏覽器可能擋了第三方 Cookie，點雲朵再登入一次；沒登入時改的東西不會丟，登入後會補傳'],
       ['一次開多個網址只開了一個？', '瀏覽器擋了彈出視窗，在網址列右邊允許這個網站'],
       ['想在另一個瀏覽器設定檔開這些網址？', '連結收藏勾好要開的，按「複製開啟連結」，到另一個設定檔的網址列貼上。' +
-        '那一頁只負責開網址，不用登入；第一次在那個設定檔用時，要允許這個網站的彈出式視窗。' +
+        '那一頁只負責開網址，不用登入，會先把網址列出來，<b>按了按鈕才開</b>（不是你自己複製的連結就別按）；' +
+        '第一次在那個設定檔用時，要允許這個網站的彈出式視窗。' +
         '被擋住時按鈕只會開還沒開的，每按一次開下一個；允許之後再按一次就全部開完'],
       ['簡體字有幾個字長得不一樣？', '☰ →「外觀」→「介面字型」改成雅黑體，繁簡就一致了'],
       ['TOTP 數字跟手機不一樣？', '檢查電腦時鐘；登入雲端時如果偵測到時差，會在卡片上方提醒'],
@@ -4452,8 +4453,8 @@
      （兩邊都登入同一份雲端會互相蓋存檔）。
 
      沒有使用者點擊的 window.open 一律被擋，除非這個網站已經被允許彈出視窗。
-     所以一進來先試一次：允許過的就全部開好了；沒允許的跳說明，下面每一條也都能
-     自己點（使用者 10/02 選的提示方式）。
+     261106a 起一進來不自動開（這種連結誰都做得出來），先列清單、按了才開；
+     被擋時跳說明，下面每一條也都能自己點（使用者 10/02 選的提示方式）。
      ============================================================ */
 
   function runOpener(list) {
@@ -4528,7 +4529,7 @@
       }
     }
 
-    function openAll(byClick) {
+    function openAll() {
       // 全部都開過了：使用者按「全部再開一次」，從頭來
       if (!left()) done = done.map(function () { return false; });
       var opened = 0, blocked = 0;
@@ -4539,18 +4540,20 @@
       paint();
       if (!blocked) return;     // 全部開完，paint 已經寫好「都開過了」
       status.className = 'op-status warn';
-      if (!opened && !byClick) {
-        status.textContent = '瀏覽器擋住了 ' + blocked + ' 個網址。請按網址列右邊被擋下的彈出式視窗圖示，' +
-          '選「一律允許」，再按一次下面的按鈕。也可以直接點下面的網址一條一條開。';
-      } else {
-        status.textContent = (opened ? '開了 ' + opened + ' 個，' : '') + '還有 ' + blocked + ' 個被瀏覽器擋住。' +
-          '請按網址列右邊的圖示允許彈出視窗，再按「開啟剩下的」；沒允許的話每按一次會開下一個，或直接點下面的網址。';
-      }
+      // 261106a 起只有按按鈕才會走到這裡（不再一進來自動試開），所以只剩這一種說法
+      status.textContent = (opened ? '開了 ' + opened + ' 個，' : '') + '還有 ' + blocked + ' 個被瀏覽器擋住。' +
+        '請按網址列右邊的圖示，選「一律允許」彈出式視窗，再按「開啟剩下的」；' +
+        '沒允許的話每按一次會開下一個，或直接點下面的網址一條一條開。';
     }
 
-    btn.addEventListener('click', function () { openAll(true); });
-    // 一進來先試一次：這個設定檔已經允許過彈出視窗的話，直接就全部開好了
-    openAll(false);
+    btn.addEventListener('click', function () { openAll(); });
+    /* 不再一進來就自動開（261106a）：這種連結任何人都做得出來，只要你那個設定檔
+       允許過這個網站的彈出視窗，點了別人傳來的連結就會一口氣開出一百個網址。
+       現在一律先列出來給你看，確認是自己要開的再按按鈕。 */
+    paint();    // 按鈕的字（全部開啟（N））要先畫出來：以前是一進來的自動嘗試順手畫的
+    status.className = 'op-status';
+    status.textContent = '先看一下下面的網址是不是你要開的，再按「全部開啟」。' +
+      '不是你自己複製的連結就不要按。';
   }
 
   /* ============================================================
@@ -4558,6 +4561,29 @@
      ============================================================ */
 
   function init() {
+    /* 防嵌入（261106a）：這個工具只能當成最上層的網頁開。被別的網站用 iframe 包起來時
+       不載入、不登入，只留一行字與直接開啟的連結——避免有人把它疊在別的畫面底下，
+       騙使用者在看不到的地方點按鈕（點擊劫持）。小視窗是獨立視窗，不受影響。 */
+    var framed = false;
+    try { framed = window.top !== window.self; } catch (err) { framed = true; }
+    if (framed) {
+      var appEl = $('app');
+      if (appEl) appEl.hidden = true;
+      var fw = document.createElement('p');
+      fw.className = 'op-foot';
+      fw.style.cssText = 'padding:24px;line-height:1.8';
+      fw.textContent = '這個工具不能放在其他網頁裡使用。';
+      var fa = document.createElement('a');
+      fa.href = location.href.split('#')[0];
+      fa.target = '_blank';
+      fa.rel = 'noopener';
+      fa.textContent = '在新分頁直接開啟';
+      fw.appendChild(document.createElement('br'));
+      fw.appendChild(fa);
+      document.body.appendChild(fw);
+      return;
+    }
+
     /* 開啟連結頁：不載入資料、不登入（理由見 runOpener） */
     var openList = DB.parseOpenLink(location.hash);
     /* 同一個分頁貼上新的開啟連結時，瀏覽器只換 # 後面、不會重新載入，

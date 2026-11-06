@@ -230,7 +230,15 @@
       box.appendChild(h);
       var msg = d.createElement('div');
       msg.className = 'pip-ask-msg';
-      msg.textContent = String(message || '').replace(/<br\s*\/?>/g, '') + '此動作無法復原。';
+      /* 訊息是給主視窗彈窗用的 HTML 字串（名稱已跳脫，261106a）。這裡只要純文字：
+         用 DOMParser 解析成「不會執行任何東西」的文件再取文字，跳脫過的 &lt; 會還原成 <，
+         但只當成字顯示。不要改回 innerHTML。 */
+      var plainMsg = '';
+      try {
+        plainMsg = new DOMParser().parseFromString(
+          String(message || '').replace(/<br\s*\/?>/g, ''), 'text/html').body.textContent || '';
+      } catch (err) { plainMsg = String(message || ''); }
+      msg.textContent = plainMsg + '此動作無法復原。';
       box.appendChild(msg);
       var row = d.createElement('div');
       row.className = 'pip-ask-row';

@@ -827,7 +827,7 @@
     if (!type || !f || !f.c) return 0;
     switch (type) {
       case 'id':
-        // 短的英數字（例如 5 碼的代號）也像編號，只給 40，才不會跟真正的編號搶
+        // 短的英數字（例如很短的代號）也像編號，只給 40，才不會跟真正的編號搶
         if (f.c === 'code') return f.a <= 3 && f.len >= 8 ? 50 : 40;
         if (f.c === 'num') return f.len >= 4 ? 40 : 0;
         if (f.c === 'word') return f.g && f.len >= 6 ? 40 : 0;
@@ -861,7 +861,7 @@
         if (!known) return 80;
         return off === 0 ? 100 : (off <= 2 ? 85 : 65);
       case 'num':
-        // 純數字長度差一碼以上就是別的東西（例如 6 碼的編號跟 4 位數的整數金額）
+        // 純數字長度差一碼以上就是別的東西（例如長度不同的純數字編號跟整數金額）
         if (!known) return 80;
         return off === 0 ? 100 : (off === 1 ? 80 : 0);
       case 'amt':
@@ -3099,9 +3099,23 @@
 
   /* ---------- 匯出／匯入 ---------- */
 
-  function exportJson() {
+  /**
+   * opt.noTrash（261106a，使用者 11/06）：給「☰ → 匯出資料」用。匯出檔**不帶最近刪除**——
+   * 刪掉的東西本來就是不要了，留在檔案裡只會在傳給別人或放錯地方時一起外洩
+   * （以前要記得先清空最近刪除再匯出，現在不用了）。
+   * 雲端同步（drive.js）呼叫時不帶這個選項：保留區要跟著同步，換台電腦才還原得回來。
+   */
+  function exportJson(opt) {
+    opt = opt || {};
     purgeTrash();
     var copy = JSON.parse(JSON.stringify(data));
+    if (opt.noTrash) {
+      copy.trash = [];
+      /* 主密碼只剩保留區裡的加密卡片在用時，拿掉保留區之後它就沒有對象了。
+         留在檔案裡只是一包沒人用得到的密文，乾脆不帶（匯入後本來也會被清掉） */
+      var vaultUsed = (copy.tabs || []).some(function (t) { return isVaultTab(t); });
+      if (!vaultUsed) delete copy.vault;
+    }
     copy.savedByDevice = navigator.platform || 'browser';
     return JSON.stringify(copy, null, 2);
   }
@@ -3263,9 +3277,24 @@
     return next;
   }
 
+  /* ---------- HTML 跳脫（261106a） ----------
+     使用者取的名字（分類、卡片標題、常用語標籤、待辦、選項名…）要放進
+     以 HTML 字串組成的確認框時，一律先經過這裡。名字可能來自別人給的
+     分享檔或備份檔，裡面若藏了 <img onerror=…> 這類東西，不跳脫就會在
+     這個網站底下執行（11/06 實測可行，已修）。 */
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   /* ---------- 對外 ---------- */
 
   window.DB = {
+    escapeHtml: escapeHtml,
     uid: uid,
     nowIso: nowIso,
     load: load,

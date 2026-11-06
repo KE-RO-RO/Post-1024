@@ -546,7 +546,7 @@
       text: '刪除這張卡片',
       danger: true,
       onClick: function () {
-        var msg = '將刪除「' + (tab.title || '未命名') + '」這張卡片及其全部內容。';
+        var msg = '將刪除「' + DB.escapeHtml(tab.title || '未命名') + '」這張卡片及其全部內容。';
         if (tab.type === 'private' || tab.type === 'totp') {
           // 卡片會先進保留區，所以確認訊息講的是還原，不是無法復原
           ctx.confirmDeletePrivate(tab, '刪除卡片', msg,
@@ -1131,7 +1131,7 @@
       head.appendChild(iconBtn('✕', '刪除這一筆', function () {
         ctx.confirmDelete(
           '刪除便籤',
-          '將刪除「' + (noteItemName(item) || '未命名') + '」這一筆。',
+          '將刪除「' + DB.escapeHtml(noteItemName(item) || '未命名') + '」這一筆。',
           function () {
             tab.items = tab.items.filter(function (x) { return x.id !== item.id; });
             tab.items.forEach(function (x, n) { x.order = n; });
@@ -1329,7 +1329,7 @@
       actions.appendChild(iconBtn('✕', '刪除這一條', function () {
         ctx.confirmDelete(
           '刪除常用語',
-          '將刪除「' + (row.label || '未命名') + '」這一條常用語。',
+          '將刪除「' + DB.escapeHtml(row.label || '未命名') + '」這一條常用語。',
           function () {
             tab.rows = tab.rows.filter(function (r) { return r.id !== row.id; });
             tab.rows.forEach(function (r, n) { r.order = n; });
@@ -1547,7 +1547,7 @@
       row.appendChild(iconBtn('✕', '刪除這項任務', function () {
         ctx.confirmDelete(
           '刪除任務',
-          '將刪除「' + (item.text || '未命名') + '」這項任務。',
+          '將刪除「' + DB.escapeHtml(item.text || '未命名') + '」這項任務。',
           function () {
             tab.items = tab.items.filter(function (x) { return x.id !== item.id; });
             tab.updatedAt = DB.nowIso();
@@ -2002,7 +2002,7 @@
 
       head.appendChild(iconBtn('✕', '刪除這一筆', function () {
         ctx.confirmDeletePrivate(tab, '刪除項目',
-          '將刪除「' + (item.name || url0 || '未命名') + '」。', function () {
+          '將刪除「' + DB.escapeHtml(item.name || url0 || '未命名') + '」。', function () {
             // 確認框開著時雲端可能換過整份資料：換成現在那一張再刪（261003a）
             var t = ctx.livePrivate ? ctx.livePrivate(tab) : tab;
             if (!t) return;
@@ -3031,7 +3031,7 @@
         acts.appendChild(iconBtn('✎', '改名稱', function () { ctx.editTotp(tab, entry); }));
         acts.appendChild(iconBtn('✕', '刪除這個帳號', function () {
           ctx.confirmDeletePrivate(tab, '刪除帳號',
-            '將刪除「' + (entry.name || '未命名') + '」這個帳號的驗證碼。' +
+            '將刪除「' + DB.escapeHtml(entry.name || '未命名') + '」這個帳號的驗證碼。' +
             '<br>手機上的 Authenticator 不受影響，但這裡的金鑰會一起消失。', function () {
               // 確認框開著時雲端可能換過整份資料：換成現在那一張再刪（261003a）
               var t = ctx.livePrivate ? ctx.livePrivate(tab) : tab;
